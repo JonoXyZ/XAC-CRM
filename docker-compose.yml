@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # MongoDB for local development
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: xac_crm_db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend (FastAPI)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      MONGO_URL: "mongodb://mongo:27017"
+      DB_NAME: "xac_crm_db"
+      JWT_SECRET: "dev-secret-key"
+      WHATSAPP_SERVICE_URL: "http://host.docker.internal:3001"  # For local WhatsApp service on host
+      CORS_ORIGINS: "http://localhost:3000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn server:app --host 0.0.0.0 --port 8001 --reload
+
+  # Frontend (React) - Dev server
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_BACKEND_URL: "http://localhost:8001/api"
+      REACT_APP_WHATSAPP_SERVICE: "http://localhost:3001"
+      WDS_SOCKET_PORT: 443
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    command: npm start
+
+volumes:
+  mongo_data:
+
+networks:
+  default:
+    name: xac_crm_network
