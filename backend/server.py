@@ -419,31 +419,53 @@ async def login(login_data: LoginRequest):
 
 @api_router.post("/auth/register", response_model=UserResponse)
 async def register(user_data: UserCreate, current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="Only admins can create users")
-    
-    existing = await db.users.find_one({"email": user_data.email})
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    hashed_password = pwd_context.hash(user_data.password)
-    
-    user_doc = {
-        "email": user_data.email,
-        "password": hashed_password,
-        "plain_password": user_data.password,
-        "name": user_data.name,
-        "role": user_data.role,
-        "phone": user_data.phone,
-        "active": user_data.active,
-        "linked_consultants": user_data.linked_consultants,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    
-    result = await db.users.insert_one(user_doc)
-    user_doc["id"] = str(result.inserted_id)
-    
-    return UserResponse(**user_doc)
+    try:
+        if current_user["role"] != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Only admins can create users")
+        
+        # Try to create user in MySQL
+        try:
+            if mysql_engine and SessionLocal:
+                db_session = SessionLocal()
+                try:
+                    # Check if user already exists
+                    existing = db_session.query(UserDB).filter(UserDB.email == user_data.email).first()
+                    if existing:
+                        raise HTTPException(status_code=400, detail="Email already registered")
+                    
+                    # Create new user
+                    new_user = UserDB(
+                        email=user_data.email,
+                        password=pwd_context.hash(user_data.password),
+                        name=user_data.name,
+                        role=user_data.role,
+                        phone=getattr(user_data, 'phone', None),
+                        active=getattr(user_data, 'active', True),
+                        linked_consultants=str(getattr(user_data, 'linked_consultants', []))
+                    )
+                    db_session.add(new_user)
+                    db_session.commit()
+                    
+                    logger.info(f"User created in MySQL: {user_data.email}")
+                    return UserResponse(
+                        id=str(new_user.id),
+                        email=new_user.email,
+                        name=new_user.name,
+                        role=new_user.role,
+                        phone=new_user.phone,
+                        active=new_user.active,
+                        linked_consultants=[]
+                    )
+                finally:
+                    db_session.close()
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error creating user in MySQL: {e}")
+            raise HTTPException(status_code=500, detail="Failed to create user")
+    except Exception as e:
+        logger.error(f"Register endpoint error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Registration failed")
 
 
 # ==========================================
@@ -587,49 +609,61 @@ async def get_leads(
     owner_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    query = {}
-    
-    if current_user["role"] == UserRole.CONSULTANT:
-        query["owner_id"] = str(current_user["_id"])
-    elif current_user["role"] == UserRole.ASSISTANT:
-        linked = current_user.get("linked_consultants", [])
-        if linked:
-            query["owner_id"] = {"$in": linked}
-    
-    if stage:
-        query["stage"] = stage
-    if owner_id:
-        query["owner_id"] = owner_id
-    
-    leads = await db.leads.find(query).to_list(1000)
-    
-    owner_ids = list(set([lead.get("owner_id") for lead in leads if lead.get("owner_id")]))
-    owners = {}
-    if owner_ids:
-        users = await db.users.find({"_id": {"$in": [ObjectId(oid) for oid in owner_ids]}}).to_list(1000)
-        owners = {str(user["_id"]): user["name"] for user in users}
-    
-    return [
-        LeadResponse(
-            id=str(lead["_id"]),
-            name=lead["name"],
-            surname=lead.get("surname"),
-            email=lead.get("email"),
-            phone=lead["phone"],
-            source=lead["source"],
-            campaign=lead.get("campaign"),
-            stage=lead["stage"],
-            owner_id=lead.get("owner_id"),
-            owner_name=owners.get(lead.get("owner_id")),
-            tags=lead.get("tags", []),
-            notes=lead.get("notes"),
-            form_answers=lead.get("form_answers"),
-            created_at=lead.get("created_at", ""),
-            updated_at=lead.get("updated_at", ""),
-            last_contact=lead.get("last_contact")
-        )
-        for lead in leads
-    ]
+    try:
+        query = {}
+        
+        if current_user["role"] == UserRole.CONSULTANT:
+            query["owner_id"] = str(current_user.get("_id", current_user.get("id")))
+        elif current_user["role"] == UserRole.ASSISTANT:
+            linked = current_user.get("linked_consultants", [])
+            if linked:
+                query["owner_id"] = {"$in": linked}
+        
+        if stage:
+            query["stage"] = stage
+        if owner_id:
+            query["owner_id"] = owner_id
+        
+        try:
+            if not db:
+                logger.warning("MongoDB not connected - returning empty leads list")
+                return []
+                
+            leads = await db.leads.find(query).to_list(1000)
+            
+            owner_ids = list(set([lead.get("owner_id") for lead in leads if lead.get("owner_id")]))
+            owners = {}
+            if owner_ids:
+                users = await db.users.find({"_id": {"$in": [ObjectId(oid) for oid in owner_ids]}}).to_list(1000)
+                owners = {str(user["_id"]): user["name"] for user in users}
+            
+            return [
+                LeadResponse(
+                    id=str(lead["_id"]),
+                    name=lead["name"],
+                    surname=lead.get("surname"),
+                    email=lead.get("email"),
+                    phone=lead["phone"],
+                    source=lead["source"],
+                    campaign=lead.get("campaign"),
+                    stage=lead["stage"],
+                    owner_id=lead.get("owner_id"),
+                    owner_name=owners.get(lead.get("owner_id")),
+                    tags=lead.get("tags", []),
+                    notes=lead.get("notes"),
+                    form_answers=lead.get("form_answers"),
+                    created_at=lead.get("created_at", ""),
+                    updated_at=lead.get("updated_at", ""),
+                    last_contact=lead.get("last_contact")
+                )
+                for lead in leads
+            ]
+        except Exception as db_error:
+            logger.error(f"MongoDB leads query failed: {db_error}")
+            return []  # Return empty list if MongoDB unavailable
+    except Exception as e:
+        logger.error(f"Get leads error: {e}", exc_info=True)
+        return []  # Return empty list on any error
 
 @api_router.get("/leads/{lead_id}", response_model=LeadResponse)
 async def get_lead(lead_id: str, current_user: dict = Depends(get_current_user)):
