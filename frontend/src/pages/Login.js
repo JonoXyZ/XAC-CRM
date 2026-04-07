@@ -14,7 +14,6 @@ const Login = ({ setUser }) => {
   const { companyName, appName } = useContext(BrandingContext);
   const [users, setUsers] = useState([]);
   const [selectedEmail, setSelectedEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   
@@ -39,8 +38,7 @@ const Login = ({ setUser }) => {
 
     try {
       const response = await axios.post(`${API_URL}/api/auth/login`, {
-        email: selectedEmail,
-        password
+        email: selectedEmail
       });
 
       localStorage.setItem('token', response.data.token);
@@ -101,22 +99,6 @@ const Login = ({ setUser }) => {
                   </option>
                 ))}
               </select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password" className="text-xs tracking-wider uppercase font-bold text-zinc-500">
-                Password
-              </Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                data-testid="login-password-input"
-                className="bg-zinc-950 border-zinc-800 text-zinc-50 focus:ring-2 focus:ring-lime-400 focus:border-transparent"
-              />
             </div>
 
             <Button
