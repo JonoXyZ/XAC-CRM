@@ -2533,7 +2533,14 @@ async def create_standalone_appointment(data: StandaloneAppointmentCreate, curre
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "https://xac-crm-production.up.railway.app",
+        "https://xac.xyzservices.co.za",
+        "*"
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
