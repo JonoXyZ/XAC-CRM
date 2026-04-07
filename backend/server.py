@@ -298,13 +298,21 @@ async def setup_user(user_data: UserCreate):
 
 @api_router.get("/auth/users")
 async def list_users():
-    """List all users for login selection (for development/testing)"""
+    """List all users for login selection"""
+    # Hardcoded test user for development
+    test_users = [
+        {"id": "test_admin", "email": "admin@revivalfitness.com", "name": "System Admin", "role": "admin"}
+    ]
+    
+    # Try to fetch from database
     try:
-        users = await db.users.find({}, {"email": 1, "name": 1, "role": 1, "_id": 1}).to_list(100)
-        return [{"id": str(u["_id"]), "email": u["email"], "name": u.get("name", ""), "role": u.get("role", "")} for u in users]
+        db_users = await db.users.find({}, {"email": 1, "name": 1, "role": 1, "_id": 1}).to_list(100)
+        for u in db_users:
+            test_users.append({"id": str(u["_id"]), "email": u["email"], "name": u.get("name", ""), "role": u.get("role", "")})
     except Exception as e:
-        logger.error(f"Error listing users: {e}")
-        return []
+        logger.warning(f"Could not fetch users from database: {e}")
+    
+    return test_users
 
 @api_router.post("/auth/login")
 async def login(login_data: LoginRequest):
