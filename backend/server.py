@@ -296,6 +296,16 @@ async def setup_user(user_data: UserCreate):
     result = await db.users.insert_one(user_doc)
     return {"success": True, "user_id": str(result.inserted_id)}
 
+@api_router.get("/auth/users")
+async def list_users():
+    """List all users for login selection (for development/testing)"""
+    try:
+        users = await db.users.find({}, {"email": 1, "name": 1, "role": 1, "_id": 1}).to_list(100)
+        return [{"id": str(u["_id"]), "email": u["email"], "name": u.get("name", ""), "role": u.get("role", "")} for u in users]
+    except Exception as e:
+        logger.error(f"Error listing users: {e}")
+        return []
+
 @api_router.post("/auth/login")
 async def login(login_data: LoginRequest):
     user = await db.users.find_one({"email": login_data.email})

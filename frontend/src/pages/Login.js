@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Button } from '../components/ui/button';
@@ -12,12 +12,26 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const Login = ({ setUser }) => {
   const { companyName, appName } = useContext(BrandingContext);
-  const [email, setEmail] = useState('');
+  const [users, setUsers] = useState([]);
+  const [selectedEmail, setSelectedEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   
   const company = JSON.parse(localStorage.getItem('company') || '{}');
+
+  // Fetch users on mount
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/api/auth/users`);
+        setUsers(response.data || []);
+      } catch (error) {
+        console.error('Failed to fetch users:', error);
+      }
+    };
+    fetchUsers();
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -25,7 +39,7 @@ const Login = ({ setUser }) => {
 
     try {
       const response = await axios.post(`${API_URL}/api/auth/login`, {
-        email,
+        email: selectedEmail,
         password
       });
 
@@ -69,19 +83,24 @@ const Login = ({ setUser }) => {
 
           <form onSubmit={handleLogin} className="space-y-6" data-testid="login-form">
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-xs tracking-wider uppercase font-bold text-zinc-500">
-                Email Address
+              <Label htmlFor="user-select" className="text-xs tracking-wider uppercase font-bold text-zinc-500">
+                Select User
               </Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@revivalfitness.com"
+              <select
+                id="user-select"
+                value={selectedEmail}
+                onChange={(e) => setSelectedEmail(e.target.value)}
                 required
-                data-testid="login-email-input"
-                className="bg-zinc-950 border-zinc-800 text-zinc-50 focus:ring-2 focus:ring-lime-400 focus:border-transparent"
-              />
+                data-testid="login-user-select"
+                className="w-full bg-zinc-950 border border-zinc-800 text-zinc-50 rounded px-3 py-2 focus:ring-2 focus:ring-lime-400 focus:border-transparent"
+              >
+                <option value="">-- Select a user --</option>
+                {users.map((user) => (
+                  <option key={user.id} value={user.email}>
+                    {user.name} ({user.email})
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-2">
