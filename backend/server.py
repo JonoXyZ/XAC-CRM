@@ -441,10 +441,12 @@ async def register(user_data: UserCreate, current_user: dict = Depends(get_curre
                         role=user_data.role,
                         phone=getattr(user_data, 'phone', None),
                         active=getattr(user_data, 'active', True),
-                        linked_consultants=str(getattr(user_data, 'linked_consultants', []))
+                        linked_consultants=str(getattr(user_data, 'linked_consultants', [])),
+                        created_at=datetime.now()
                     )
                     db_session.add(new_user)
                     db_session.commit()
+                    db_session.refresh(new_user)
                     
                     logger.info(f"User created in MySQL: {user_data.email}")
                     return UserResponse(
@@ -454,15 +456,21 @@ async def register(user_data: UserCreate, current_user: dict = Depends(get_curre
                         role=new_user.role,
                         phone=new_user.phone,
                         active=new_user.active,
-                        linked_consultants=[]
+                        linked_consultants=[],
+                        created_at=new_user.created_at.isoformat() if new_user.created_at else datetime.now().isoformat()
                     )
                 finally:
                     db_session.close()
+            else:
+                logger.error("MySQL engine or SessionLocal not initialized")
+                raise HTTPException(status_code=500, detail="Database not configured")
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error creating user in MySQL: {e}")
-            raise HTTPException(status_code=500, detail="Failed to create user")
+            logger.error(f"Error creating user in MySQL: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Register endpoint error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Registration failed")
