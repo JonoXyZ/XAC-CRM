@@ -2605,9 +2605,9 @@ async def startup_db():
     db = client[os.environ['DB_NAME']]
     logger.info("MongoDB connected successfully")
     
-    # Start appointment reminder checker
+    # Create background task but DON'T await it — store ref for clean cancellation
     import asyncio
-    asyncio.create_task(appointment_reminder_loop())
+    app.state.reminder_task = asyncio.create_task(appointment_reminder_loop())
     
     admin_exists = await db.users.find_one({"role": UserRole.ADMIN})
     
@@ -2645,6 +2645,12 @@ async def startup_db():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    if hasattr(app.state, 'reminder_task'):
+        app.state.reminder_task.cancel()
+        try:
+            await app.state.reminder_task
+        except asyncio.CancelledError:
+            pass
     if client:
         client.close()
         logger.info("MongoDB connection closed")
