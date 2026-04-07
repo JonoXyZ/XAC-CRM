@@ -124,7 +124,7 @@ class LeadStage:
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: Optional[str] = None  # Optional for dev mode (password-less)
     role: Optional[str] = None
 
 class UserCreate(BaseModel):
