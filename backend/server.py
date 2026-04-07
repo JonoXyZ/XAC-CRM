@@ -17,9 +17,20 @@ from passlib.context import CryptContext
 import jwt
 from bson import ObjectId
 import httpx
+import google.generativeai as genai
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+# ==========================================
+# Gemini AI Configuration
+# ==========================================
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', 'AIzaSyDmilu-CEPtBsNMeHiIQGxT9CZ9BzLXps8')
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_model = genai.GenerativeModel('gemini-pro')
+else:
+    gemini_model = None
 
 # MongoDB will be initialized in startup_db() event handler
 client = None
@@ -474,13 +485,56 @@ async def register(user_data: UserCreate, current_user: dict = Depends(get_curre
         raise HTTPException(status_code=500, detail="Registration failed")
 
 
-# ==========================================
-# Notification Endpoints
-# ==========================================
+@api_router.post("/auth/signup", response_model=UserResponse)
+async def signup(user_data: UserCreate):
+    """Public signup endpoint - allows anyone to create an account"""
+    try:
+        if db_engine and SessionLocal:
+            db_session = SessionLocal()
+            try:
+                # Check if email already exists
+                existing = db_session.query(UserDB).filter(UserDB.email == user_data.email).first()
+                if existing:
+                    raise HTTPException(status_code=400, detail="Email already registered")
+                
+                # Create new user with default role (consultant)
+                new_user = UserDB(
+                    email=user_data.email,
+                    password=pwd_context.hash(user_data.password),
+                    name=user_data.name or user_data.email.split('@')[0],
+                    role=UserRole.CONSULTANT,  # Default role for new signups
+                    phone=getattr(user_data, 'phone', None),
+                    active=True,
+                    linked_consultants="[]",
+                    created_at=datetime.now()
+                )
+                db_session.add(new_user)
+                db_session.commit()
+                db_session.refresh(new_user)
+                
+                logger.info(f"New user signed up: {user_data.email}")
+                return UserResponse(
+                    id=str(new_user.id),
+                    email=new_user.email,
+                    name=new_user.name,
+                    role=new_user.role,
+                    phone=new_user.phone,
+                    active=new_user.active,
+                    linked_consultants=[],
+                    created_at=new_user.created_at.isoformat() if new_user.created_at else datetime.now().isoformat()
+                )
+            finally:
+                db_session.close()
+        else:
+            logger.error("Database engine not initialized for signup")
+            raise HTTPException(status_code=500, detail="Database not configured")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Signup error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create account: {str(e)}")
 
-@api_router.get("/notifications")
-async def get_notifications(current_user: dict = Depends(get_current_user)):
-    notifs = await db.notifications.find(
+
         {"user_id": str(current_user["_id"])}
     ).sort("created_at", -1).to_list(50)
     return [{
@@ -2842,6 +2896,12 @@ class BugReportCreate(BaseModel):
     page: Optional[str] = None
     browser: Optional[str] = None
 
+class BugAnalysisRequest(BaseModel):
+    context: Optional[str] = None  # Additional context like error logs
+
+class BugFixApplyRequest(BaseModel):
+    analysis_id: str  # Reference to the analysis result
+
 @api_router.post("/bug-reports")
 async def create_bug_report(data: BugReportCreate, current_user: dict = Depends(get_current_user)):
     user_id = str(current_user["_id"])
@@ -2918,6 +2978,136 @@ async def update_bug_report(report_id: str, updates: Dict[str, Any], current_use
     if filtered:
         await db.bug_reports.update_one({"_id": ObjectId(report_id)}, {"$set": filtered})
     return {"success": True}
+
+@api_router.post("/bug-reports/{report_id}/analyze")
+async def analyze_bug_with_ai(report_id: str, data: Optional[BugAnalysisRequest] = None, current_user: dict = Depends(get_current_user)):
+    """Analyze a bug report using Gemini AI and provide explanation"""
+    if current_user["role"] != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only admins can analyze bugs with AI")
+    
+    if not gemini_model:
+        raise HTTPException(status_code=500, detail="Gemini API not configured")
+    
+    try:
+        # Get the bug report
+        report = await db.bug_reports.find_one({"_id": ObjectId(report_id)})
+        if not report:
+            raise HTTPException(status_code=404, detail="Bug report not found")
+        
+        # Build context for AI analysis
+        context = f"""
+Bug Report Analysis Request:
+
+PRIORITY: {report.get('priority', 'medium').upper()}
+PAGE/AREA: {report.get('page', 'Unknown')}
+REPORTED BY: {report.get('reported_by_name', 'Unknown')}
+DESCRIPTION:
+{report.get('description', '')}
+
+{f'ADDITIONAL CONTEXT: {data.context}' if data and data.context else ''}
+
+Please analyze this bug report and provide:
+1. A clear explanation of what the problem is (in simple English)
+2. What might be causing it (likely root cause)
+3. The impact level (low/medium/high)
+4. Suggested solution approach
+5. Steps to reproduce (if applicable)
+
+Format your response clearly with sections for each point.
+"""
+        
+        # Call Gemini API
+        response = gemini_model.generate_content(context)
+        analysis_text = response.text
+        
+        # Save analysis to database
+        analysis_doc = {
+            "report_id": ObjectId(report_id),
+            "analysis": analysis_text,
+            "analyzed_at": datetime.now(timezone.utc).isoformat(),
+            "analyzed_by": str(current_user["_id"]),
+            "confirmed": False
+        }
+        result = await db.bug_analyses.insert_one(analysis_doc)
+        
+        return {
+            "success": True,
+            "analysis_id": str(result.inserted_id),
+            "explanation": analysis_text,
+            "report_id": report_id
+        }
+    except Exception as e:
+        logger.error(f"Bug analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+@api_router.post("/bug-reports/{report_id}/fix")
+async def apply_ai_fix(report_id: str, analysis_id: str, current_user: dict = Depends(get_current_user)):
+    """Apply the AI-suggested fix to the bug report"""
+    if current_user["role"] != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only admins can apply fixes")
+    
+    if not gemini_model:
+        raise HTTPException(status_code=500, detail="Gemini API not configured")
+    
+    try:
+        # Get the bug report and analysis
+        report = await db.bug_reports.find_one({"_id": ObjectId(report_id)})
+        analysis = await db.bug_analyses.find_one({"_id": ObjectId(analysis_id)})
+        
+        if not report or not analysis:
+            raise HTTPException(status_code=404, detail="Report or analysis not found")
+        
+        # Call Gemini to generate a code fix
+        fix_prompt = f"""
+Based on this bug analysis, please provide a concrete code fix:
+
+BUG DESCRIPTION:
+{report.get('description', '')}
+
+ANALYSIS:
+{analysis.get('analysis', '')}
+
+Please provide:
+1. The problematic code (if applicable)
+2. The fixed code
+3. Explanation of the fix
+4. How to test the fix
+
+Format as a code patch that can be applied.
+"""
+        
+        fix_response = gemini_model.generate_content(fix_prompt)
+        fix_text = fix_response.text
+        
+        # Update bug report to mark as in_progress and generate tracking
+        await db.bug_reports.update_one(
+            {"_id": ObjectId(report_id)},
+            {
+                "$set": {
+                    "status": "in_progress",
+                    "ai_fix_applied": True,
+                    "ai_fix_text": fix_text,
+                    "fixed_at": datetime.now(timezone.utc).isoformat(),
+                    "fixed_by": str(current_user["_id"])
+                }
+            }
+        )
+        
+        # Mark analysis as confirmed
+        await db.bug_analyses.update_one(
+            {"_id": ObjectId(analysis_id)},
+            {"$set": {"confirmed": True, "confirmed_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        
+        return {
+            "success": True,
+            "fix": fix_text,
+            "status": "in_progress",
+            "message": "Fix has been generated and bug status updated to In Progress"
+        }
+    except Exception as e:
+        logger.error(f"Bug fix error: {e}")
+        raise HTTPException(status_code=500, detail=f"Fix generation failed: {str(e)}")
 
 # ==========================================
 # Webhook Logs & Marketing Endpoints
