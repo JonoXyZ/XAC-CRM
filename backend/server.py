@@ -124,6 +124,105 @@ class UserDB(Base):
     linked_consultants = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
+class LeadDB(Base):
+    __tablename__ = "leads"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=True, index=True)
+    phone = Column(String(20), nullable=True)
+    owner_id = Column(String(50), nullable=True, index=True)
+    stage = Column(String(50), default="new", index=True)
+    status = Column(String(50), default="active")
+    source = Column(String(100), nullable=True)
+    value = Column(String(50), nullable=True)
+    notes = Column(Text, nullable=True)
+    score = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now)
+
+class DealDB(Base):
+    __tablename__ = "deals"
+    
+    id = Column(Integer, primary_key=True)
+    lead_id = Column(String(50), nullable=False, index=True)
+    closed_by = Column(String(50), nullable=True, index=True)
+    sales_value = Column(Float, default=0)
+    debit_order_value = Column(Float, default=0)
+    units = Column(Integer, default=0)
+    payment_type = Column(String(50), nullable=True)
+    status = Column(String(50), default="open")
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now)
+
+class ActivityDB(Base):
+    __tablename__ = "activities"
+    
+    id = Column(Integer, primary_key=True)
+    lead_id = Column(String(50), nullable=False, index=True)
+    user_id = Column(String(50), nullable=True)
+    activity_type = Column(String(100), nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+class AppointmentDB(Base):
+    __tablename__ = "appointments"
+    
+    id = Column(Integer, primary_key=True)
+    lead_id = Column(String(50), nullable=True, index=True)
+    booked_by = Column(String(50), nullable=True, index=True)
+    scheduled_at = Column(String(100), nullable=True, index=True)
+    title = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
+    status = Column(String(50), default="scheduled")
+    created_at = Column(DateTime, default=datetime.now)
+
+class NotificationDB(Base):
+    __tablename__ = "notifications"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String(50), nullable=False, index=True)
+    notif_type = Column(String(100), nullable=True)
+    title = Column(String(255), nullable=True)
+    message = Column(Text, nullable=True)
+    lead_id = Column(String(50), nullable=True)
+    read = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+class AuditLogDB(Base):
+    __tablename__ = "audit_logs"
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String(50), nullable=True)
+    action = Column(String(255), nullable=True)
+    resource_id = Column(String(50), nullable=True)
+    resource_type = Column(String(100), nullable=True)
+    details = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+class SettingsDB(Base):
+    __tablename__ = "settings"
+    
+    id = Column(Integer, primary_key=True)
+    key = Column(String(255), unique=True, nullable=False)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.now)
+
+class BugReportDB(Base):
+    __tablename__ = "bug_reports"
+    
+    id = Column(Integer, primary_key=True)
+    description = Column(Text, nullable=False)
+    priority = Column(String(50), default="medium")
+    page = Column(String(255), nullable=True)
+    browser = Column(String(255), nullable=True)
+    reported_by = Column(String(50), nullable=True)
+    reported_by_name = Column(String(255), nullable=True)
+    reported_by_email = Column(String(255), nullable=True)
+    status = Column(String(50), default="open")
+    wa_sent = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
 WHATSAPP_SERVICE_URL = os.environ.get('WHATSAPP_SERVICE_URL', 'http://localhost:3001')
 
 app = FastAPI()
@@ -337,31 +436,66 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token")
     
-    user = await db.users.find_one({"_id": ObjectId(user_id)})
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    
-    return user
+    try:
+        session = SessionLocal()
+        try:
+            user = session.query(UserDB).filter(UserDB.id == int(user_id) if user_id.isdigit() else UserDB.email == user_id).first()
+            if not user:
+                raise HTTPException(status_code=401, detail="User not found")
+            
+            return {
+                "id": user.id,
+                "_id": str(user.id),
+                "email": user.email,
+                "name": user.name,
+                "role": user.role,
+                "phone": user.phone,
+                "active": user.active,
+                "linked_consultants": user.linked_consultants or "[]"
+            }
+        finally:
+            session.close()
+    except Exception as e:
+        logger.error(f"get_current_user error: {e}")
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
 async def get_next_consultant_for_assignment():
-    consultants = await db.users.find({
-        "role": UserRole.CONSULTANT,
-        "active": True
-    }).to_list(100)
-    
-    if not consultants:
+    try:
+        session = SessionLocal()
+        try:
+            consultants = session.query(UserDB).filter(
+                UserDB.role == "consultant",
+                UserDB.active == True
+            ).all()
+            
+            if not consultants:
+                return None
+            
+            lead_counts = []
+            for consultant in consultants:
+                count = session.query(LeadDB).filter(
+                    LeadDB.owner_id == str(consultant.id),
+                    LeadDB.stage.notin_(["closed_won", "closed_lost", "invalid"])
+                ).count()
+                lead_counts.append({"consultant": consultant, "count": count})
+            
+            if not lead_counts:
+                return None
+            
+            lead_counts.sort(key=lambda x: x["count"])
+            best = lead_counts[0]["consultant"]
+            return {
+                "id": best.id,
+                "_id": str(best.id),
+                "email": best.email,
+                "name": best.name,
+                "role": best.role
+            }
+        finally:
+            session.close()
+    except Exception as e:
+        logger.warning(f"get_next_consultant_for_assignment error: {e}")
         return None
-    
-    lead_counts = []
-    for consultant in consultants:
-        count = await db.leads.count_documents({
-            "owner_id": str(consultant["_id"]),
-            "stage": {"$nin": [LeadStage.CLOSED_WON, LeadStage.CLOSED_LOST]}
-        })
-        lead_counts.append({"consultant": consultant, "count": count})
-    
-    lead_counts.sort(key=lambda x: x["count"])
-    return lead_counts[0]["consultant"] if lead_counts else None
 
 
 @api_router.get("/health")
@@ -1031,52 +1165,51 @@ async def get_deals(
 
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
-    query = {}
-    
-    if current_user["role"] == UserRole.CONSULTANT:
-        query["owner_id"] = str(current_user["_id"])
-    
-    total_leads = await db.leads.count_documents(query)
-    
-    closed_won_query = {**query, "stage": LeadStage.CLOSED_WON}
-    closed_won = await db.leads.count_documents(closed_won_query)
-    
-    conversion_rate = (closed_won / total_leads * 100) if total_leads > 0 else 0
-    
-    deals_query = {}
-    if current_user["role"] == UserRole.CONSULTANT:
-        deals_query["closed_by"] = str(current_user["_id"])
-    
-    deals = await db.deals.find(deals_query).to_list(1000)
-    
-    invalid_lead_ids = []
-    invalid_leads = await db.leads.find({"stage": LeadStage.INVALID}).to_list(1000)
-    invalid_lead_ids = [str(lead["_id"]) for lead in invalid_leads]
-    
-    cash_total = sum(
-        d.get("sales_value", 0) or 0 
-        for d in deals 
-        if d["payment_type"] == "Cash" and d["lead_id"] not in invalid_lead_ids
-    )
-    debit_total = sum(
-        d.get("debit_order_value", 0) or 0 
-        for d in deals 
-        if d["payment_type"] == "Debit Order" and d["lead_id"] not in invalid_lead_ids
-    )
-    total_units = sum(
-        d.get("units", 0) or 0 
-        for d in deals 
-        if d["lead_id"] not in invalid_lead_ids
-    )
-    
-    return {
-        "total_leads": total_leads,
-        "closed_won": closed_won,
-        "conversion_rate": round(conversion_rate, 2),
-        "cash_sales": round(cash_total, 2),
-        "debit_sales": round(debit_total, 2),
-        "total_units": total_units
-    }
+    try:
+        session = SessionLocal()
+        try:
+            user_id = str(current_user.get("id", current_user.get("_id", "")))
+            user_role = current_user.get("role", "consultant")
+            
+            leads_query = session.query(LeadDB)
+            if user_role == "consultant":
+                leads_query = leads_query.filter(LeadDB.owner_id == user_id)
+            
+            total_leads = leads_query.count()
+            closed_won = leads_query.filter(LeadDB.stage == "closed_won").count()
+            conversion_rate = (closed_won / total_leads * 100) if total_leads > 0 else 0
+            
+            deals_query = session.query(DealDB)
+            if user_role == "consultant":
+                deals_query = deals_query.filter(DealDB.closed_by == user_id)
+            
+            deals = deals_query.all()
+            invalid_lead_ids = [str(l.id) for l in session.query(LeadDB).filter(LeadDB.stage == "invalid").all()]
+            
+            cash_total = sum(d.sales_value or 0 for d in deals if d.payment_type == "Cash" and str(d.lead_id) not in invalid_lead_ids)
+            debit_total = sum(d.debit_order_value or 0 for d in deals if d.payment_type == "Debit Order" and str(d.lead_id) not in invalid_lead_ids)
+            total_units = sum(d.units or 0 for d in deals if str(d.lead_id) not in invalid_lead_ids)
+            
+            return {
+                "total_leads": total_leads,
+                "closed_won": closed_won,
+                "conversion_rate": round(conversion_rate, 2),
+                "cash_sales": round(cash_total, 2),
+                "debit_sales": round(debit_total, 2),
+                "total_units": total_units
+            }
+        finally:
+            session.close()
+    except Exception as e:
+        logger.error(f"Dashboard stats error: {e}")
+        return {
+            "total_leads": 0,
+            "closed_won": 0,
+            "conversion_rate": 0,
+            "cash_sales": 0,
+            "debit_sales": 0,
+            "total_units": 0
+        }
 
 @api_router.get("/dashboard/assistant-stats")
 async def get_assistant_dashboard_stats(current_user: dict = Depends(get_current_user)):
