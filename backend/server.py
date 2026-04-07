@@ -736,17 +736,29 @@ async def signup(user_data: UserCreate):
         raise HTTPException(status_code=500, detail=f"Failed to create account: {str(e)}")
 
 
-        {"user_id": str(current_user["_id"])}
-    ).sort("created_at", -1).to_list(50)
-    return [{
-        "id": str(n["_id"]),
-        "type": n["type"],
-        "title": n["title"],
-        "message": n["message"],
-        "lead_id": n.get("lead_id"),
-        "read": n.get("read", False),
-        "created_at": n["created_at"]
-    } for n in notifs]
+@api_router.get("/notifications")
+async def get_notifications(current_user: dict = Depends(get_current_user)):
+    try:
+        session = SessionLocal()
+        try:
+            notifs = session.query(NotificationDB).filter(
+                NotificationDB.user_id == str(current_user.get("id", current_user.get("_id", "")))
+            ).order_by(NotificationDB.created_at.desc()).limit(50).all()
+            
+            return [{
+                "id": str(n.id),
+                "type": n.notif_type,
+                "title": n.title,
+                "message": n.message,
+                "lead_id": n.lead_id,
+                "read": n.read,
+                "created_at": n.created_at.isoformat() if n.created_at else ""
+            } for n in notifs]
+        finally:
+            session.close()
+    except Exception as e:
+        logger.warning(f"Get notifications error: {e}")
+        return []
 
 @api_router.get("/notifications/unread-count")
 async def get_unread_count(current_user: dict = Depends(get_current_user)):
