@@ -275,6 +275,27 @@ async def get_branding():
         "app_name": settings.get("app_name", "XAC CRM") if settings else "XAC CRM"
     }
 
+@api_router.post("/auth/setup")
+async def setup_user(user_data: UserCreate):
+    """Setup endpoint for initial user creation (for development)"""
+    existing = await db.users.find_one({"email": user_data.email})
+    if existing:
+        raise HTTPException(status_code=400, detail="User already exists")
+    
+    user_doc = {
+        "email": user_data.email,
+        "password": pwd_context.hash(user_data.password),
+        "plain_password": user_data.password,
+        "name": user_data.name,
+        "role": user_data.role,
+        "phone": user_data.phone or "",
+        "active": user_data.active,
+        "linked_consultants": user_data.linked_consultants,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    result = await db.users.insert_one(user_doc)
+    return {"success": True, "user_id": str(result.inserted_id)}
+
 @api_router.post("/auth/login")
 async def login(login_data: LoginRequest):
     user = await db.users.find_one({"email": login_data.email})
