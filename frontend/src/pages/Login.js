@@ -24,9 +24,16 @@ const Login = ({ setUser }) => {
     const fetchUsers = async () => {
       try {
         const response = await axios.get(`${API_URL}/api/auth/users`);
-        setUsers(response.data || []);
+        // Ensure response.data is an array
+        if (Array.isArray(response.data)) {
+          setUsers(response.data);
+        } else {
+          console.error('Invalid users response:', response.data);
+          setUsers([]);
+        }
       } catch (error) {
         console.error('Failed to fetch users:', error);
+        setUsers([]); // Set empty array on error
       }
     };
     fetchUsers();
@@ -37,9 +44,22 @@ const Login = ({ setUser }) => {
     setLoading(true);
 
     try {
+      if (!selectedEmail) {
+        toast.error('Please select a user');
+        setLoading(false);
+        return;
+      }
+
       const response = await axios.post(`${API_URL}/api/auth/login`, {
         email: selectedEmail
       });
+
+      if (!response.data.token || !response.data.user) {
+        toast.error('Invalid response from server');
+        console.error('Invalid login response:', response.data);
+        setLoading(false);
+        return;
+      }
 
       localStorage.setItem('token', response.data.token);
       localStorage.setItem('user', JSON.stringify(response.data.user));

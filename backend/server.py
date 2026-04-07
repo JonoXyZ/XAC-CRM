@@ -328,8 +328,8 @@ async def list_users():
     # Try to fetch from MySQL database
     try:
         if mysql_engine and SessionLocal:
-            db_session = SessionLocal()
             try:
+                db_session = SessionLocal()
                 users = db_session.query(UserDB).all()
                 for u in users:
                     test_users.append({
@@ -338,8 +338,9 @@ async def list_users():
                         "name": u.name or "",
                         "role": u.role or "consultant"
                     })
-            finally:
                 db_session.close()
+            except Exception as db_error:
+                logger.warning(f"MySQL query error: {db_error}")
     except Exception as e:
         logger.warning(f"Could not fetch users from MySQL: {e}")
     
@@ -349,6 +350,7 @@ async def list_users():
             {"id": "test_admin", "email": "admin@revivalfitness.com", "name": "System Admin", "role": "admin"}
         ]
     
+    logger.info(f"Returning users: {test_users}")
     return test_users
 
 @api_router.post("/auth/login")
@@ -357,50 +359,63 @@ async def login(login_data: LoginRequest):
     DEV MODE: Password-less login - accepts any email
     Remove password verification for development
     """
-    user = None
-    
-    # Try to get user from MySQL database
     try:
-        if mysql_engine and SessionLocal:
-            db_session = SessionLocal()
-            try:
-                user = db_session.query(UserDB).filter(UserDB.email == login_data.email).first()
-            finally:
-                db_session.close()
-    except Exception as e:
-        logger.warning(f"Could not fetch user from MySQL: {e}")
-    
-    # If user not found in MySQL, use hardcoded test user
-    if not user:
-        if login_data.email == "admin@revivalfitness.com":
-            user = type('obj', (object,), {
-                "id": "test_admin",
-                "email": "admin@revivalfitness.com",
-                "name": "System Admin",
-                "role": "admin",
-                "active": True
-            })()
-        else:
-            raise HTTPException(status_code=401, detail="User not found")
-    
-    if not getattr(user, 'active', True):
-        raise HTTPException(status_code=403, detail="Account is inactive")
-    
-    token = create_access_token({
-        "user_id": str(user.id if hasattr(user, 'id') else "test_admin"),
-        "email": user.email,
-        "role": getattr(user, 'role', 'consultant')
-    })
-    
-    return {
-        "token": token,
-        "user": {
-            "id": str(user.id if hasattr(user, 'id') else "test_admin"),
+        logger.info(f"Login attempt with email: {login_data.email}")
+        user = None
+        
+        # Try to get user from MySQL database
+        try:
+            if mysql_engine and SessionLocal:
+                db_session = SessionLocal()
+                try:
+                    user = db_session.query(UserDB).filter(UserDB.email == login_data.email).first()
+                    if user:
+                        logger.info(f"Found user in MySQL: {user.email}")
+                finally:
+                    db_session.close()
+        except Exception as e:
+            logger.warning(f"Could not fetch user from MySQL: {e}")
+        
+        # If user not found in MySQL, use hardcoded test user
+        if not user:
+            if login_data.email == "admin@revivalfitness.com":
+                logger.info("Using hardcoded test user")
+                user = type('obj', (object,), {
+                    "id": "test_admin",
+                    "email": "admin@revivalfitness.com",
+                    "name": "System Admin",
+                    "role": "admin",
+                    "active": True
+                })()
+            else:
+                logger.warning(f"User not found: {login_data.email}")
+                raise HTTPException(status_code=401, detail="User not found")
+        
+        if not getattr(user, 'active', True):
+            raise HTTPException(status_code=403, detail="Account is inactive")
+        
+        token = create_access_token({
+            "user_id": str(user.id if hasattr(user, 'id') else "test_admin"),
             "email": user.email,
-            "name": getattr(user, 'name', ''),
             "role": getattr(user, 'role', 'consultant')
+        })
+        
+        response = {
+            "token": token,
+            "user": {
+                "id": str(user.id if hasattr(user, 'id') else "test_admin"),
+                "email": user.email,
+                "name": getattr(user, 'name', ''),
+                "role": getattr(user, 'role', 'consultant')
+            }
         }
-    }
+        logger.info(f"Login successful for: {user.email}")
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Login processing failed")
 
 @api_router.post("/auth/register", response_model=UserResponse)
 async def register(user_data: UserCreate, current_user: dict = Depends(get_current_user)):
