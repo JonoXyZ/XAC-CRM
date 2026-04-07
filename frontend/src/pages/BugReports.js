@@ -5,7 +5,7 @@ import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
-import { Bug, CheckCircle, Clock, Warning, ArrowsClockwise } from '@phosphor-icons/react';
+import { Bug, CheckCircle, Clock, Warning, ArrowsClockwise, Sparkles, X } from '@phosphor-icons/react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -27,6 +27,17 @@ const BugReports = ({ user }) => {
   const [loading, setLoading] = useState(true);
   const [filterPriority, setFilterPriority] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [analysisModal, setAnalysisModal] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isApplyingFix, setIsApplyingFix] = useState(false);
+  const [submitModal, setSubmitModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formData, setFormData] = useState({
+    description: '',
+    priority: 'medium',
+    page: '',
+    browser: ''
+  });
 
   useEffect(() => {
     fetchReports();
@@ -39,8 +50,9 @@ const BugReports = ({ user }) => {
         headers: { Authorization: `Bearer ${token}` }
       });
       setReports(res.data);
-    } catch {
-      toast.error('Failed to load bug reports');
+    } catch (error) {
+      console.error('Bug reports fetch error:', error.response?.data || error.message);
+      toast.error(error.response?.data?.detail || 'Failed to load bug reports');
     } finally {
       setLoading(false);
     }
@@ -56,6 +68,81 @@ const BugReports = ({ user }) => {
       fetchReports();
     } catch {
       toast.error('Failed to update');
+    }
+  };
+
+  const analyzeWithAI = async (reportId) => {
+    setIsAnalyzing(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${API_URL}/api/bug-reports/${reportId}/analyze`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setAnalysisModal({
+        reportId,
+        analysisId: res.data.analysis_id,
+        explanation: res.data.explanation,
+      });
+      toast.success('Bug analyzed by Gemini AI');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Analysis failed');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const applyFix = async () => {
+    if (!analysisModal) return;
+    
+    setIsApplyingFix(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${API_URL}/api/bug-reports/${analysisModal.reportId}/fix`,
+        { analysis_id: analysisModal.analysisId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success('Fix applied! Bug status moved to "In Progress"');
+      setAnalysisModal(null);
+      fetchReports();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to apply fix');
+    } finally {
+      setIsApplyingFix(false);
+    }
+  };
+
+  const cancelAnalysis = () => {
+    setAnalysisModal(null);
+  };
+
+  const submitBugReport = async (e) => {
+    e.preventDefault();
+    if (!formData.description.trim()) {
+      toast.error('Please describe the bug');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${API_URL}/api/bug-reports`,
+        formData,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success('Bug report submitted successfully!');
+      setSubmitModal(false);
+      setFormData({ description: '', priority: 'medium', page: '', browser: '' });
+      fetchReports();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to submit bug report');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -83,9 +170,19 @@ const BugReports = ({ user }) => {
             </h1>
             <p className="mt-2 text-base text-zinc-400">All submitted bug reports from your team</p>
           </div>
-          <Button onClick={fetchReports} className="bg-zinc-800 text-zinc-50 hover:bg-zinc-700" data-testid="refresh-reports">
-            <ArrowsClockwise size={18} />
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              onClick={() => setSubmitModal(true)} 
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              data-testid="submit-bug-btn"
+            >
+              <Bug size={18} className="mr-2" />
+              Report Bug
+            </Button>
+            <Button onClick={fetchReports} className="bg-zinc-800 text-zinc-50 hover:bg-zinc-700" data-testid="refresh-reports">
+              <ArrowsClockwise size={18} />
+            </Button>
+          </div>
         </div>
 
         {/* Stats */}
@@ -175,28 +272,176 @@ const BugReports = ({ user }) => {
                         </span>
                       </div>
                       <p className="text-sm text-zinc-200 mb-2 whitespace-pre-wrap">{report.description}</p>
-                      <div className="flex items-center gap-4 text-xs text-zinc-500">
+                      <div className="flex items-center gap-4 text-xs text-zinc-500 mb-3">
                         <span>By: <strong className="text-zinc-300">{report.reported_by_name}</strong> ({report.reported_by_email})</span>
                         <span>Page: {report.page || 'N/A'}</span>
                         {report.wa_sent && (
                           <span className="text-emerald-500">WA Sent</span>
                         )}
                       </div>
+                      {report.status === 'open' && user?.role === 'admin' && (
+                        <Button
+                          onClick={() => analyzeWithAI(report.id)}
+                          disabled={isAnalyzing}
+                          className="bg-purple-600 hover:bg-purple-700 text-white text-xs h-8"
+                        >
+                          <Sparkles size={14} className="mr-1" />
+                          {isAnalyzing ? 'Analyzing...' : 'Fix with AI'}
+                        </Button>
+                      )}
                     </div>
-                    <Select value={report.status} onValueChange={(v) => updateStatus(report.id, v)}>
-                      <SelectTrigger className="w-36 bg-zinc-950 border-zinc-800 text-zinc-50 text-xs" data-testid={`status-select-${report.id}`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-zinc-900 border-zinc-800">
-                        <SelectItem value="open">Open</SelectItem>
-                        <SelectItem value="in_progress">In Progress</SelectItem>
-                        <SelectItem value="resolved">Resolved</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {user?.role === 'admin' && (
+                      <Select value={report.status} onValueChange={(v) => updateStatus(report.id, v)}>
+                        <SelectTrigger className="w-36 bg-zinc-950 border-zinc-800 text-zinc-50 text-xs" data-testid={`status-select-${report.id}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-zinc-900 border-zinc-800">
+                          <SelectItem value="open">Open</SelectItem>
+                          <SelectItem value="in_progress">In Progress</SelectItem>
+                          <SelectItem value="resolved">Resolved</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 </Card>
               );
             })}
+          </div>
+        )}
+
+        {/* Analysis Modal */}
+        {analysisModal && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+            <Card className="w-full max-w-2xl bg-zinc-900 border-zinc-800 max-h-[80vh] overflow-y-auto">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={24} className="text-purple-400" />
+                    <h2 className="text-2xl font-bold text-zinc-50">AI Analysis</h2>
+                  </div>
+                  <button onClick={cancelAnalysis} className="text-zinc-400 hover:text-zinc-50">
+                    <X size={24} />
+                  </button>
+                </div>
+
+                <div className="bg-zinc-950/50 border border-zinc-800 rounded-lg p-4 mb-6">
+                  <p className="text-zinc-100 whitespace-pre-wrap text-sm leading-relaxed">
+                    {analysisModal.explanation}
+                  </p>
+                </div>
+
+                <div className="flex gap-3 justify-end">
+                  <Button
+                    onClick={cancelAnalysis}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-zinc-50"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={applyFix}
+                    disabled={isApplyingFix}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    {isApplyingFix ? 'Applying Fix...' : 'Confirm & Apply Fix'}
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* Submit Bug Report Modal */}
+        {submitModal && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+            <Card className="w-full max-w-2xl bg-zinc-900 border-zinc-800">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Bug size={24} className="text-blue-400" />
+                    <h2 className="text-2xl font-bold text-zinc-50">Report a Bug</h2>
+                  </div>
+                  <button onClick={() => setSubmitModal(false)} className="text-zinc-400 hover:text-zinc-50">
+                    <X size={24} />
+                  </button>
+                </div>
+
+                <form onSubmit={submitBugReport} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-300 mb-2">
+                      Bug Description *
+                    </label>
+                    <textarea
+                      value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                      placeholder="Describe what's wrong..."
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded text-zinc-50 placeholder-zinc-600 focus:outline-none focus:border-blue-500 min-h-[100px]"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-300 mb-2">
+                        Priority
+                      </label>
+                      <select
+                        value={formData.priority}
+                        onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                        className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded text-zinc-50 focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="critical">Critical</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-300 mb-2">
+                        Page/Area
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.page}
+                        onChange={(e) => setFormData({ ...formData, page: e.target.value })}
+                        placeholder="e.g., Dashboard, Leads"
+                        className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded text-zinc-50 placeholder-zinc-600 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-300 mb-2">
+                      Browser (optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.browser}
+                      onChange={(e) => setFormData({ ...formData, browser: e.target.value })}
+                      placeholder="e.g., Chrome, Firefox"
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded text-zinc-50 placeholder-zinc-600 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div className="flex gap-3 justify-end pt-4">
+                    <Button
+                      type="button"
+                      onClick={() => setSubmitModal(false)}
+                      className="bg-zinc-800 hover:bg-zinc-700 text-zinc-50"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      {isSubmitting ? 'Submitting...' : 'Submit Bug Report'}
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </Card>
           </div>
         )}
       </div>
