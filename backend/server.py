@@ -262,6 +262,11 @@ async def get_next_consultant_for_assignment():
     return lead_counts[0]["consultant"] if lead_counts else None
 
 
+@api_router.get("/health")
+async def health_check():
+    """Simple health check endpoint"""
+    return {"status": "ok"}
+
 @api_router.get("/branding")
 async def get_branding():
     settings = await db.settings.find_one({"key": "system_settings"})
