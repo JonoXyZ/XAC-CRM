@@ -1,4 +1,6 @@
 // index.js
+require('dotenv').config();
+
 const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const express = require('express');
 const QRCode = require('qrcode');
