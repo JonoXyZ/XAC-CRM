@@ -124,7 +124,7 @@ class LeadStage:
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: Optional[str] = None  # Optional for dev mode (password-less)
+    password: str  # Password required
     role: Optional[str] = None
 
 class UserCreate(BaseModel):
@@ -356,57 +356,55 @@ async def list_users():
 @api_router.post("/auth/login")
 async def login(login_data: LoginRequest):
     """
-    DEV MODE: Password-less login - accepts any email
-    Remove password verification for development
+    Login with email and password
     """
     try:
         logger.info(f"Login attempt with email: {login_data.email}")
         user = None
         
-        # Try to get user from PostgreSQL database
+        # Get user from PostgreSQL database
         try:
             if db_engine and SessionLocal:
                 db_session = SessionLocal()
                 try:
                     user = db_session.query(UserDB).filter(UserDB.email == login_data.email).first()
                     if user:
-                        logger.info(f"Found user in MySQL: {user.email}")
+                        logger.info(f"Found user in PostgreSQL: {user.email}")
                 finally:
                     db_session.close()
         except Exception as e:
-            logger.warning(f"Could not fetch user from MySQL: {e}")
+            logger.warning(f"Could not fetch user from PostgreSQL: {e}")
         
-        # If user not found in MySQL, use hardcoded test user
+        # User not found
         if not user:
-            if login_data.email == "admin@revivalfitness.com":
-                logger.info("Using hardcoded test user")
-                user = type('obj', (object,), {
-                    "id": "test_admin",
-                    "email": "admin@revivalfitness.com",
-                    "name": "System Admin",
-                    "role": "admin",
-                    "active": True
-                })()
-            else:
-                logger.warning(f"User not found: {login_data.email}")
-                raise HTTPException(status_code=401, detail="User not found")
+            logger.warning(f"User not found: {login_data.email}")
+            raise HTTPException(status_code=401, detail="Invalid email or password")
         
-        if not getattr(user, 'active', True):
+        if not user.active:
             raise HTTPException(status_code=403, detail="Account is inactive")
         
+        # Verify password
+        if not user.password:
+            logger.warning(f"User {user.email} has no password set")
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        if not pwd_context.verify(login_data.password, user.password):
+            logger.warning(f"Invalid password for user: {login_data.email}")
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
         token = create_access_token({
-            "user_id": str(user.id if hasattr(user, 'id') else "test_admin"),
+            "user_id": str(user.id),
             "email": user.email,
-            "role": getattr(user, 'role', 'consultant')
+            "role": user.role
         })
         
         response = {
             "token": token,
             "user": {
-                "id": str(user.id if hasattr(user, 'id') else "test_admin"),
+                "id": str(user.id),
                 "email": user.email,
-                "name": getattr(user, 'name', ''),
-                "role": getattr(user, 'role', 'consultant')
+                "name": user.name or "",
+                "role": user.role
             }
         }
         logger.info(f"Login successful for: {user.email}")

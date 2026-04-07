@@ -14,6 +14,7 @@ const Login = ({ setUser }) => {
   const { companyName, appName } = useContext(BrandingContext);
   const [users, setUsers] = useState([]);
   const [selectedEmail, setSelectedEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   
@@ -50,8 +51,15 @@ const Login = ({ setUser }) => {
         return;
       }
 
+      if (!password) {
+        toast.error('Please enter your password');
+        setLoading(false);
+        return;
+      }
+
       const response = await axios.post(`${API_URL}/api/auth/login`, {
-        email: selectedEmail
+        email: selectedEmail,
+        password: password
       });
 
       if (!response.data.token || !response.data.user) {
@@ -119,6 +127,22 @@ const Login = ({ setUser }) => {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="password" className="text-xs tracking-wider uppercase font-bold text-zinc-500">
+                Password
+              </Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                data-testid="login-password-input"
+                className="bg-zinc-950 border-zinc-800 text-zinc-50"
+              />
             </div>
 
             <Button
