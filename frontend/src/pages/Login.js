@@ -1,5 +1,5 @@
 import React, { useState, useContext, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -154,17 +154,24 @@ const Login = ({ setUser }) => {
             <p>Forgot your password? Send <strong>.XACPASS</strong> to your linked WhatsApp.</p>
           </div>
 
-          <div className="border-t border-zinc-800 pt-6 mt-4">
-            <div className="text-center space-y-2">
-              <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Contact Us</h3>
+          <div className="border-t border-zinc-800 pt-6 mt-4 space-y-4">
+            <div className="text-center">
+              <p className="text-zinc-400">Don't have an account? </p>
+              <Link to="/signup" className="text-lime-400 hover:text-lime-300 font-semibold">
+                Create one now
+              </Link>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider text-center">Contact Us</h3>
               <a
                 href="mailto:Xac@Xyzservices.co.za"
-                className="text-sm text-lime-400 hover:text-lime-300 font-semibold transition-colors"
+                className="text-sm text-lime-400 hover:text-lime-300 font-semibold transition-colors block text-center"
                 data-testid="contact-email-link"
               >
                 Xac@Xyzservices.co.za
               </a>
-              <p className="text-xs text-zinc-600">More details to follow</p>
+              <p className="text-xs text-zinc-600 text-center">More details to follow</p>
             </div>
           </div>
         </div>
