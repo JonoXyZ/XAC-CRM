@@ -4,10 +4,7 @@ const { MongoClient } = require('mongodb');
 const { initAuthCreds } = require('@whiskeysockets/baileys');
 
 // MongoDB connection
-const client = new MongoClient(process.env.MONGO_URL, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-});
+const client = new MongoClient(process.env.MONGO_URL);
 
 let collection;
 
