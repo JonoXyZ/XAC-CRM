@@ -225,14 +225,14 @@ class TestAIChat:
     """Test AI Chat Assistant endpoint"""
     
     def test_ai_chat_endpoint(self, auth_headers):
-        """Test AI chat endpoint (connected to GPT-4o via Emergent LLM Key)"""
+        """Test AI chat endpoint"""
         chat_data = {
             "message": "Hello, what can you help me with?",
             "session_id": None
         }
         response = requests.post(f"{BASE_URL}/api/ai/chat", json=chat_data, headers=auth_headers)
         
-        # AI endpoint may take time or fail if LLM key issues
+        # AI endpoint may take time or may not be fully implemented
         if response.status_code == 200:
             data = response.json()
             assert "response" in data
