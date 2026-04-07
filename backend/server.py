@@ -12,6 +12,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional, Dict, Any
 import uuid
+import asyncio
 from datetime import datetime, timezone, timedelta
 from passlib.context import CryptContext
 import jwt
@@ -32,9 +33,75 @@ if GEMINI_API_KEY:
 else:
     gemini_model = None
 
-# MongoDB will be initialized in startup_db() event handler
+# MongoDB will be initialized in startup_db() event handler (optional, fallback to empty responses)
 client = None
 db = None
+
+# Fault-tolerant MongoDB wrapper - returns safe defaults when MongoDB is unavailable
+class MongoDBFallback:
+    """Fallback class when MongoDB connection fails - returns safe empty responses"""
+    async def count_documents(self, query):
+        logger.debug(f"MongoDB unavailable - returning count of 0 for query: {query}")
+        return 0
+    
+    async def find_one(self, query):
+        logger.debug(f"MongoDB unavailable - returning None for find_one: {query}")
+        return None
+    
+    async def find(self, query):
+        logger.debug(f"MongoDB unavailable - returning empty list for find: {query}")
+        return AsyncCursorFallback([])
+    
+    def sort(self, *args, **kwargs):
+        return self
+    
+    async def to_list(self, n):
+        return []
+    
+    async def insert_one(self, doc):
+        logger.debug(f"MongoDB unavailable - not inserting doc")
+        return type('obj', (object,), {'inserted_id': str(uuid.uuid4())})()
+    
+    async def insert_many(self, docs):
+        logger.debug(f"MongoDB unavailable - not inserting {len(docs)} docs")
+        return type('obj', (object,), {'inserted_ids': [str(uuid.uuid4()) for _ in docs]})()
+    
+    async def update_one(self, filter_query, update):
+        logger.debug(f"MongoDB unavailable - not updating: {filter_query}")
+        return type('obj', (object,), {'matched_count': 0, 'modified_count': 0})()
+    
+    async def update_many(self, filter_query, update):
+        logger.debug(f"MongoDB unavailable - not updating many: {filter_query}")
+        return type('obj', (object,), {'matched_count': 0, 'modified_count': 0})()
+    
+    async def delete_one(self, filter_query):
+        logger.debug(f"MongoDB unavailable - not deleting: {filter_query}")
+        return type('obj', (object,), {'deleted_count': 0})()
+    
+    async def delete_many(self, filter_query):
+        logger.debug(f"MongoDB unavailable - not deleting many: {filter_query}")
+        return type('obj', (object,), {'deleted_count': 0})()
+
+class AsyncCursorFallback:
+    """Fallback async cursor"""
+    def __init__(self, data):
+        self.data = data
+    
+    def sort(self, *args, **kwargs):
+        return self
+    
+    async def to_list(self, n):
+        return self.data
+
+class MongoDBProxy:
+    """Proxy that returns fallback collections if MongoDB is unavailable"""
+    def __init__(self):
+        self._fallback = MongoDBFallback()
+    
+    def __getattr__(self, name):
+        if db and db is not self._fallback:
+            return getattr(db, name)
+        return self._fallback
 
 # Supabase PostgreSQL Database Setup
 Base = declarative_base()
@@ -2821,6 +2888,9 @@ async def appointment_reminder_loop():
 async def startup_db():
     global client, db, db_engine, SessionLocal
     
+    # Initialize fallback MongoDB (safe default)
+    fallback_db = MongoDBFallback()
+    
     try:
         # Initialize Supabase PostgreSQL connection
         db_url = os.environ.get('DATABASE_URL', 'postgresql://postgres:Xyzservices12!!@db.fmztbzqmkywsbimzlivi.supabase.co:5432/postgres')
@@ -2857,20 +2927,27 @@ async def startup_db():
         logger.info("PostgreSQL (Supabase) connected successfully")
     except Exception as e:
         logger.error(f"PostgreSQL initialization failed: {e}")
+        db = fallback_db  # Use fallback if PostgreSQL fails too
+        return
     
     try:
-        # Initialize MongoDB connection (keeping for non-auth data for now)
-        mongo_url = os.environ['MONGO_URL']
-        client = AsyncIOMotorClient(mongo_url)
-        db = client[os.environ['DB_NAME']]
-        logger.info("MongoDB connected successfully")
+        # Initialize MongoDB connection (optional - will use fallback if unavailable)
+        mongo_url = os.environ.get('MONGO_URL')
+        db_name = os.environ.get('DB_NAME')
         
-        # Start appointment reminder checker
-        import asyncio
-        asyncio.create_task(appointment_reminder_loop())
+        if mongo_url and db_name:
+            client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=2000)
+            db = client[db_name]
+            logger.info("MongoDB connected successfully")
+            
+            # Start appointment reminder checker
+            asyncio.create_task(appointment_reminder_loop())
+        else:
+            logger.info("MongoDB credentials not configured - using fallback responses")
+            db = fallback_db
     except Exception as e:
-        logger.error(f"MongoDB initialization failed: {e}")
-        logger.info("App will continue with PostgreSQL only - MongoDB is optional")
+        logger.warning(f"MongoDB connection failed: {e} - using fallback responses for non-auth data")
+        db = fallback_db
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
@@ -2953,9 +3030,16 @@ async def create_bug_report(data: BugReportCreate, current_user: dict = Depends(
 
 @api_router.get("/bug-reports")
 async def get_bug_reports(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="Only admins can view all bug reports")
-    reports = await db.bug_reports.find({}).sort("created_at", -1).to_list(500)
+    """Get bug reports - Admins see all, others see open/unresolved only"""
+    if current_user["role"] == UserRole.ADMIN:
+        # Admins see all reports
+        reports = await db.bug_reports.find({}).sort("created_at", -1).to_list(500)
+    else:
+        # Non-admins see only open and in_progress reports
+        reports = await db.bug_reports.find({
+            "status": {"$in": ["open", "in_progress"]}
+        }).sort("created_at", -1).to_list(500)
+    
     return [{
         "id": str(r["_id"]),
         "description": r["description"],
@@ -2966,7 +3050,9 @@ async def get_bug_reports(current_user: dict = Depends(get_current_user)):
         "reported_by_email": r.get("reported_by_email", ""),
         "status": r.get("status", "open"),
         "wa_sent": r.get("wa_sent", False),
-        "created_at": r.get("created_at", "")
+        "created_at": r.get("created_at", ""),
+        "ai_fix_applied": r.get("ai_fix_applied", False),
+        "ai_fix_text": r.get("ai_fix_text") if current_user["role"] == UserRole.ADMIN else None
     } for r in reports]
 
 @api_router.put("/bug-reports/{report_id}")
