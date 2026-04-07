@@ -109,24 +109,19 @@ const Login = ({ setUser }) => {
 
           <form onSubmit={handleLogin} className="space-y-6" data-testid="login-form">
             <div className="space-y-2">
-              <Label htmlFor="user-select" className="text-xs tracking-wider uppercase font-bold text-zinc-500">
-                Select User
+              <Label htmlFor="email" className="text-xs tracking-wider uppercase font-bold text-zinc-500">
+                Email
               </Label>
-              <select
-                id="user-select"
+              <Input
+                id="email"
+                type="email"
+                placeholder="Enter your email"
                 value={selectedEmail}
                 onChange={(e) => setSelectedEmail(e.target.value)}
                 required
-                data-testid="login-user-select"
-                className="w-full bg-zinc-950 border border-zinc-800 text-zinc-50 rounded px-3 py-2 focus:ring-2 focus:ring-lime-400 focus:border-transparent"
-              >
-                <option value="">-- Select a user --</option>
-                {users.map((user) => (
-                  <option key={user.id} value={user.email}>
-                    {user.name} ({user.email})
-                  </option>
-                ))}
-              </select>
+                data-testid="login-email-input"
+                className="bg-zinc-950 border-zinc-800 text-zinc-50"
+              />
             </div>
 
             <div className="space-y-2">
