@@ -18,9 +18,9 @@ import httpx
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# MongoDB will be initialized in startup_db() event handler
+client = None
+db = None
 
 WHATSAPP_SERVICE_URL = os.environ.get('WHATSAPP_SERVICE_URL', 'http://localhost:3001')
 
@@ -2597,6 +2597,14 @@ async def appointment_reminder_loop():
 
 @app.on_event("startup")
 async def startup_db():
+    global client, db
+    
+    # Initialize MongoDB connection
+    mongo_url = os.environ['MONGO_URL']
+    client = AsyncIOMotorClient(mongo_url)
+    db = client[os.environ['DB_NAME']]
+    logger.info("MongoDB connected successfully")
+    
     # Start appointment reminder checker
     import asyncio
     asyncio.create_task(appointment_reminder_loop())
@@ -2637,7 +2645,9 @@ async def startup_db():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    if client:
+        client.close()
+        logger.info("MongoDB connection closed")
 
 # ==========================================
 # Bug Report Endpoints
