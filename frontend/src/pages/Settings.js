@@ -1060,12 +1060,12 @@ const Settings = ({ user }) => {
                 <div className="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
                   <h4 className="font-bold text-zinc-100 mb-2">Global Password Reset</h4>
                   <p className="text-sm text-zinc-400 mb-4">
-                    Reset ALL user passwords to <code className="bg-zinc-800 px-2 py-0.5 rounded text-lime-400">123xyz/</code>. 
+                    Reset ALL user passwords to <code className="bg-zinc-800 px-2 py-0.5 rounded text-lime-400">RFC911</code>. 
                     This affects every user in the system.
                   </p>
                   <Button
                     onClick={async () => {
-                      if (!window.confirm('WARNING: This will reset ALL user passwords to "123xyz/". Are you sure?')) return;
+                      if (!window.confirm('WARNING: This will reset ALL user passwords to "RFC911". Are you sure?')) return;
                       try {
                         const token = localStorage.getItem('token');
                         const res = await axios.post(`${API_URL}/api/admin/reset-all-passwords`, {}, {

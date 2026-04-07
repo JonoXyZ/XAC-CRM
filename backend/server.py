@@ -2439,7 +2439,7 @@ async def reset_all_passwords(current_user: dict = Depends(get_current_user)):
     if current_user["role"] != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Only admins can reset passwords")
     
-    new_password_hash = pwd_context.hash("123xyz/")
+    new_password_hash = pwd_context.hash("RFC911")
     result = await db.users.update_many({}, {"$set": {"password": new_password_hash}})
     
     await db.audit_logs.insert_one({
@@ -2449,7 +2449,7 @@ async def reset_all_passwords(current_user: dict = Depends(get_current_user)):
         "details": {"users_affected": result.modified_count}
     })
     
-    return {"success": True, "users_reset": result.modified_count, "new_password": "123xyz/"}
+    return {"success": True, "users_reset": result.modified_count, "new_password": "RFC911"}
 
 @api_router.post("/admin/create-master-account")
 async def create_master_account(current_user: dict = Depends(get_current_user)):
