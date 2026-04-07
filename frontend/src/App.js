@@ -23,6 +23,17 @@ import './App.css';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
+// Add JWT token to all requests
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
+});
+
 export const BrandingContext = React.createContext({
   companyName: 'Revival Fitness',
   appName: 'XAC CRM'
