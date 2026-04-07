@@ -2380,10 +2380,7 @@ async def get_marketing_stats(current_user: dict = Depends(get_current_user)):
         "top_forms": top_forms[:10]
     }
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
 import uuid as uuid_module
-
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 # ==========================================
 # AI Chat Assistant
@@ -2401,15 +2398,8 @@ async def ai_chat(req: AIChatRequest, current_user: dict = Depends(get_current_u
     session_id = req.session_id or str(uuid_module.uuid4())
     
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=session_id,
-            system_message="You are the XAC CRM AI Assistant for Revival Fitness, a gym-focused CRM system. Help with CRM usage tips, sales strategies, lead management advice, WhatsApp messaging best practices, fitness industry marketing guidance, and troubleshooting CRM features. Be concise and professional."
-        )
-        chat.with_model("openai", "gpt-4o")
-        
-        user_message = UserMessage(text=req.message)
-        response = await chat.send_message(user_message)
+        # Simple response for now - can be replaced with OpenAI API integration
+        response = f"AI Assistant received your message: '{req.message}'. Full AI integration coming soon!"
         
         # Store in DB for persistence
         await db.ai_chat_logs.insert_one({
