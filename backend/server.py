@@ -25,13 +25,13 @@ load_dotenv(ROOT_DIR / '.env')
 client = None
 db = None
 
-# MySQL Database Setup
+# Supabase PostgreSQL Database Setup
 Base = declarative_base()
-mysql_engine = None
+db_engine = None
 SessionLocal = None
 
 # ==========================================
-# SQLAlchemy User Model for MySQL
+# SQLAlchemy User Model for PostgreSQL
 # ==========================================
 class UserDB(Base):
     __tablename__ = "users"
@@ -325,9 +325,9 @@ async def list_users():
     """List all users for login selection"""
     test_users = []
     
-    # Try to fetch from MySQL database
+    # Try to fetch from PostgreSQL database
     try:
-        if mysql_engine and SessionLocal:
+        if db_engine and SessionLocal:
             try:
                 db_session = SessionLocal()
                 users = db_session.query(UserDB).all()
@@ -363,9 +363,9 @@ async def login(login_data: LoginRequest):
         logger.info(f"Login attempt with email: {login_data.email}")
         user = None
         
-        # Try to get user from MySQL database
+        # Try to get user from PostgreSQL database
         try:
-            if mysql_engine and SessionLocal:
+            if db_engine and SessionLocal:
                 db_session = SessionLocal()
                 try:
                     user = db_session.query(UserDB).filter(UserDB.email == login_data.email).first()
@@ -423,9 +423,9 @@ async def register(user_data: UserCreate, current_user: dict = Depends(get_curre
         if current_user["role"] != UserRole.ADMIN:
             raise HTTPException(status_code=403, detail="Only admins can create users")
         
-        # Try to create user in MySQL
+        # Try to create user in PostgreSQL
         try:
-            if mysql_engine and SessionLocal:
+            if db_engine and SessionLocal:
                 db_session = SessionLocal()
                 try:
                     # Check if user already exists
@@ -2767,24 +2767,44 @@ async def appointment_reminder_loop():
 
 @app.on_event("startup")
 async def startup_db():
-    global client, db, mysql_engine, SessionLocal
+    global client, db, db_engine, SessionLocal
     
     try:
-        # Initialize MySQL connection
-        mysql_url = os.environ.get('MYSQL_URL', 'mysql+pymysql://xyzservi_xaccrm:XACservices12!!@xyzservices.co.za:3306/xyzservi_xaccrm')
-        mysql_engine = create_engine(mysql_url, echo=False)
-        SessionLocal = sessionmaker(bind=mysql_engine)
+        # Initialize Supabase PostgreSQL connection
+        db_url = os.environ.get('DATABASE_URL', 'postgresql://postgres:Xyzservices12!!@db.fmztbzqmkywsbimzlivi.supabase.co:5432/postgres')
+        db_engine = create_engine(db_url, echo=False)
+        SessionLocal = sessionmaker(bind=db_engine)
         
         # Create tables if they don't exist
         try:
-            Base.metadata.create_all(bind=mysql_engine)
-            logger.info("MySQL tables created successfully")
+            Base.metadata.create_all(bind=db_engine)
+            logger.info("PostgreSQL tables created successfully")
+            
+            # Check if admin user exists, if not create it
+            db_session = SessionLocal()
+            try:
+                admin = db_session.query(UserDB).filter(UserDB.email == "admin@revivalfitness.com").first()
+                if not admin:
+                    admin_user = UserDB(
+                        email="admin@revivalfitness.com",
+                        password=pwd_context.hash("Admin@2026"),
+                        name="System Admin",
+                        role=UserRole.ADMIN,
+                        phone="+27123456789",
+                        active=True,
+                        created_at=datetime.now()
+                    )
+                    db_session.add(admin_user)
+                    db_session.commit()
+                    logger.info("Admin user created: admin@revivalfitness.com")
+            finally:
+                db_session.close()
         except Exception as e:
-            logger.warning(f"Could not create MySQL tables: {e}")
+            logger.warning(f"Could not initialize PostgreSQL tables: {e}")
         
-        logger.info("MySQL connected successfully")
+        logger.info("PostgreSQL (Supabase) connected successfully")
     except Exception as e:
-        logger.error(f"MySQL initialization failed: {e}")
+        logger.error(f"PostgreSQL initialization failed: {e}")
     
     try:
         # Initialize MongoDB connection (keeping for non-auth data for now)
@@ -2796,46 +2816,15 @@ async def startup_db():
         # Start appointment reminder checker
         import asyncio
         asyncio.create_task(appointment_reminder_loop())
-        
-        try:
-            admin_exists = await db.users.find_one({"role": UserRole.ADMIN})
-            
-            if not admin_exists:
-                admin_user = {
-                    "email": "admin@revivalfitness.com",
-                    "password": pwd_context.hash("Admin@2026"),
-                    "plain_password": "Admin@2026",
-                    "name": "System Admin",
-                    "role": UserRole.ADMIN,
-                    "phone": "+27123456789",
-                    "active": True,
-                    "linked_consultants": [],
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                }
-                await db.users.insert_one(admin_user)
-                logger.info("Admin user created: admin@revivalfitness.com / Admin@2026")
-            
-            # Ensure MASTER account exists
-            master_exists = await db.users.find_one({"email": "mastergrey666@xac.com"})
-            if not master_exists:
-                master_user = {
-                    "email": "mastergrey666@xac.com",
-                    "password": pwd_context.hash("MASTERGREY666"),
-                    "plain_password": "MASTERGREY666",
-                    "name": "MASTERGREY666",
-                    "role": UserRole.ADMIN,
-                    "phone": "",
-                    "active": True,
-                    "linked_consultants": [],
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                }
-                await db.users.insert_one(master_user)
-                logger.info("MASTER account created: mastergrey666@xac.com / MASTERGREY666")
-        except Exception as e:
-            logger.warning(f"Could not initialize admin accounts: {e}")
     except Exception as e:
         logger.error(f"MongoDB initialization failed: {e}")
-        logger.info("App will continue with MySQL only - MongoDB is optional")
+        logger.info("App will continue with PostgreSQL only - MongoDB is optional")
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    if client:
+        client.close()
+        logger.info("MongoDB connection closed")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
