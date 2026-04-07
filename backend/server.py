@@ -3,6 +3,9 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
 import os
 import logging
 from pathlib import Path
@@ -21,6 +24,27 @@ load_dotenv(ROOT_DIR / '.env')
 # MongoDB will be initialized in startup_db() event handler
 client = None
 db = None
+
+# MySQL Database Setup
+Base = declarative_base()
+mysql_engine = None
+SessionLocal = None
+
+# ==========================================
+# SQLAlchemy User Model for MySQL
+# ==========================================
+class UserDB(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    password = Column(String(255), nullable=True)
+    name = Column(String(255), nullable=True)
+    role = Column(String(50), default="consultant")
+    phone = Column(String(20), nullable=True)
+    active = Column(Boolean, default=True)
+    linked_consultants = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
 
 WHATSAPP_SERVICE_URL = os.environ.get('WHATSAPP_SERVICE_URL', 'http://localhost:3001')
 
@@ -299,18 +323,31 @@ async def setup_user(user_data: UserCreate):
 @api_router.get("/auth/users")
 async def list_users():
     """List all users for login selection"""
-    # Hardcoded test user for development
-    test_users = [
-        {"id": "test_admin", "email": "admin@revivalfitness.com", "name": "System Admin", "role": "admin"}
-    ]
+    test_users = []
     
-    # Try to fetch from database
+    # Try to fetch from MySQL database
     try:
-        db_users = await db.users.find({}, {"email": 1, "name": 1, "role": 1, "_id": 1}).to_list(100)
-        for u in db_users:
-            test_users.append({"id": str(u["_id"]), "email": u["email"], "name": u.get("name", ""), "role": u.get("role", "")})
+        if mysql_engine and SessionLocal:
+            db_session = SessionLocal()
+            try:
+                users = db_session.query(UserDB).all()
+                for u in users:
+                    test_users.append({
+                        "id": str(u.id),
+                        "email": u.email,
+                        "name": u.name or "",
+                        "role": u.role or "consultant"
+                    })
+            finally:
+                db_session.close()
     except Exception as e:
-        logger.warning(f"Could not fetch users from database: {e}")
+        logger.warning(f"Could not fetch users from MySQL: {e}")
+    
+    # If no users in MySQL, return hardcoded test user
+    if not test_users:
+        test_users = [
+            {"id": "test_admin", "email": "admin@revivalfitness.com", "name": "System Admin", "role": "admin"}
+        ]
     
     return test_users
 
@@ -320,41 +357,48 @@ async def login(login_data: LoginRequest):
     DEV MODE: Password-less login - accepts any email
     Remove password verification for development
     """
-    # Try to get user from database
     user = None
-    try:
-        user = await db.users.find_one({"email": login_data.email})
-    except:
-        pass
     
-    # If user not found, use hardcoded test user
+    # Try to get user from MySQL database
+    try:
+        if mysql_engine and SessionLocal:
+            db_session = SessionLocal()
+            try:
+                user = db_session.query(UserDB).filter(UserDB.email == login_data.email).first()
+            finally:
+                db_session.close()
+    except Exception as e:
+        logger.warning(f"Could not fetch user from MySQL: {e}")
+    
+    # If user not found in MySQL, use hardcoded test user
     if not user:
         if login_data.email == "admin@revivalfitness.com":
-            user = {
-                "_id": "test_admin",
+            user = type('obj', (object,), {
+                "id": "test_admin",
                 "email": "admin@revivalfitness.com",
                 "name": "System Admin",
-                "role": "admin"
-            }
+                "role": "admin",
+                "active": True
+            })()
         else:
             raise HTTPException(status_code=401, detail="User not found")
     
-    if not user.get("active", True):
+    if not getattr(user, 'active', True):
         raise HTTPException(status_code=403, detail="Account is inactive")
     
     token = create_access_token({
-        "user_id": str(user["_id"]),
-        "email": user["email"],
-        "role": user.get("role", "consultant")
+        "user_id": str(user.id if hasattr(user, 'id') else "test_admin"),
+        "email": user.email,
+        "role": getattr(user, 'role', 'consultant')
     })
     
     return {
         "token": token,
         "user": {
-            "id": str(user["_id"]),
-            "email": user["email"],
-            "name": user.get("name", ""),
-            "role": user.get("role", "consultant")
+            "id": str(user.id if hasattr(user, 'id') else "test_admin"),
+            "email": user.email,
+            "name": getattr(user, 'name', ''),
+            "role": getattr(user, 'role', 'consultant')
         }
     }
 
@@ -2666,10 +2710,27 @@ async def appointment_reminder_loop():
 
 @app.on_event("startup")
 async def startup_db():
-    global client, db
+    global client, db, mysql_engine, SessionLocal
     
     try:
-        # Initialize MongoDB connection
+        # Initialize MySQL connection
+        mysql_url = os.environ.get('MYSQL_URL', 'mysql+pymysql://xyzservi_xaccrm:XACservices12!!@xyzservices.co.za:3306/xyzservi_xaccrm')
+        mysql_engine = create_engine(mysql_url, echo=False)
+        SessionLocal = sessionmaker(bind=mysql_engine)
+        
+        # Create tables if they don't exist
+        try:
+            Base.metadata.create_all(bind=mysql_engine)
+            logger.info("MySQL tables created successfully")
+        except Exception as e:
+            logger.warning(f"Could not create MySQL tables: {e}")
+        
+        logger.info("MySQL connected successfully")
+    except Exception as e:
+        logger.error(f"MySQL initialization failed: {e}")
+    
+    try:
+        # Initialize MongoDB connection (keeping for non-auth data for now)
         mongo_url = os.environ['MONGO_URL']
         client = AsyncIOMotorClient(mongo_url)
         db = client[os.environ['DB_NAME']]
@@ -2716,7 +2777,8 @@ async def startup_db():
         except Exception as e:
             logger.warning(f"Could not initialize admin accounts: {e}")
     except Exception as e:
-        logger.error(f"Startup database initialization failed: {e}")
+        logger.error(f"MongoDB initialization failed: {e}")
+        logger.info("App will continue with MySQL only - MongoDB is optional")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
