@@ -2599,49 +2599,55 @@ async def appointment_reminder_loop():
 async def startup_db():
     global client, db
     
-    # Initialize MongoDB connection
-    mongo_url = os.environ['MONGO_URL']
-    client = AsyncIOMotorClient(mongo_url)
-    db = client[os.environ['DB_NAME']]
-    logger.info("MongoDB connected successfully")
-    
-    # Start appointment reminder checker
-    import asyncio
-    asyncio.create_task(appointment_reminder_loop())
-    
-    admin_exists = await db.users.find_one({"role": UserRole.ADMIN})
-    
-    if not admin_exists:
-        admin_user = {
-            "email": "admin@revivalfitness.com",
-            "password": pwd_context.hash("Admin@2026"),
-            "plain_password": "Admin@2026",
-            "name": "System Admin",
-            "role": UserRole.ADMIN,
-            "phone": "+27123456789",
-            "active": True,
-            "linked_consultants": [],
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.users.insert_one(admin_user)
-        logger.info("Admin user created: admin@revivalfitness.com / Admin@2026")
-    
-    # Ensure MASTER account exists
-    master_exists = await db.users.find_one({"email": "mastergrey666@xac.com"})
-    if not master_exists:
-        master_user = {
-            "email": "mastergrey666@xac.com",
-            "password": pwd_context.hash("MASTERGREY666"),
-            "plain_password": "MASTERGREY666",
-            "name": "MASTERGREY666",
-            "role": UserRole.ADMIN,
-            "phone": "",
-            "active": True,
-            "linked_consultants": [],
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.users.insert_one(master_user)
-        logger.info("MASTER account created: mastergrey666@xac.com / MASTERGREY666")
+    try:
+        # Initialize MongoDB connection
+        mongo_url = os.environ['MONGO_URL']
+        client = AsyncIOMotorClient(mongo_url)
+        db = client[os.environ['DB_NAME']]
+        logger.info("MongoDB connected successfully")
+        
+        # Start appointment reminder checker
+        import asyncio
+        asyncio.create_task(appointment_reminder_loop())
+        
+        try:
+            admin_exists = await db.users.find_one({"role": UserRole.ADMIN})
+            
+            if not admin_exists:
+                admin_user = {
+                    "email": "admin@revivalfitness.com",
+                    "password": pwd_context.hash("Admin@2026"),
+                    "plain_password": "Admin@2026",
+                    "name": "System Admin",
+                    "role": UserRole.ADMIN,
+                    "phone": "+27123456789",
+                    "active": True,
+                    "linked_consultants": [],
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
+                await db.users.insert_one(admin_user)
+                logger.info("Admin user created: admin@revivalfitness.com / Admin@2026")
+            
+            # Ensure MASTER account exists
+            master_exists = await db.users.find_one({"email": "mastergrey666@xac.com"})
+            if not master_exists:
+                master_user = {
+                    "email": "mastergrey666@xac.com",
+                    "password": pwd_context.hash("MASTERGREY666"),
+                    "plain_password": "MASTERGREY666",
+                    "name": "MASTERGREY666",
+                    "role": UserRole.ADMIN,
+                    "phone": "",
+                    "active": True,
+                    "linked_consultants": [],
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
+                await db.users.insert_one(master_user)
+                logger.info("MASTER account created: mastergrey666@xac.com / MASTERGREY666")
+        except Exception as e:
+            logger.warning(f"Could not initialize admin accounts: {e}")
+    except Exception as e:
+        logger.error(f"Startup database initialization failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
