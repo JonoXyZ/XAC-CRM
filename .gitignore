@@ -26,9 +26,9 @@ next-env.d.ts
 *.tsbuildinfo
 
 # Production builds
-/build
 dist/
 dist
+# Note: frontend/build is intentionally NOT ignored - it's committed to repo for Railway deployment
 
 # Environment files (comprehensive coverage)
 
