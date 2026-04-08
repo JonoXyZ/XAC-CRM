@@ -2969,45 +2969,40 @@ app.add_middleware(
 )
 
 # Mount static files (React frontend build)
-# Step 1: Find project root by looking for .git or package.json
-def find_project_root():
-    """Find project root by searching for .git or package.json"""
-    current = Path(__file__).resolve()
-    for _ in range(10):  # Search up to 10 levels
-        if (current / ".git").exists() or (current / "package.json").exists():
-            logger.info(f"Found project root: {current}")
-            return current
-        if current.parent == current:  # Reached filesystem root
-            break
-        current = current.parent
+# In Docker, the layout is:
+# /app/server.py (this file)
+# /app/frontend/build/index.html
+# /app/... (other files)
+# So frontend build should be at __file__.parent / "frontend" / "build"
+
+# Also check for dev environments where it's:
+# /project/backend/server.py
+# /project/frontend/build/index.html
+
+def find_frontend_build():
+    """Find frontend build directory"""
+    # Direct paths to check
+    paths_to_check = [
+        Path(__file__).parent / "frontend" / "build",  # Docker: /app/server.py -> /app/frontend/build
+        Path(__file__).parent.parent / "frontend" / "build",  # Dev: /project/backend/server.py -> /project/frontend/build
+        Path.cwd() / "frontend" / "build",  # CWD/frontend/build
+        Path("/app") / "frontend" / "build",  # Explicit Docker root
+    ]
+    
+    for path in paths_to_check:
+        resolved = path.resolve()
+        index_file = resolved / "index.html"
+        logger.debug(f"Checking frontend at: {resolved}")
+        if index_file.exists():
+            logger.info(f"✅ Found frontend build at: {resolved}")
+            return resolved
+        else:
+            logger.debug(f"Not found: {resolved}")
+    
+    logger.warning("⚠️ Frontend build not found at any location")
     return None
 
-project_root = find_project_root()
-if not project_root:
-    project_root = Path(__file__).parent.parent  # Fallback to ../
-
-logger.info(f"Project root: {project_root}")
-logger.info(f"Project root contents: {list(project_root.iterdir())[:10]}")
-
-# Step 2: Look for frontend build from project root
-frontend_build_path = None
-possible_paths = [
-    project_root / "frontend" / "build",
-    project_root / ".." / "frontend" / "build",
-    Path("/app") / "frontend" / "build",
-]
-
-for path in possible_paths:
-    resolved = path.resolve()
-    index_file = resolved / "index.html"
-    logger.debug(f"Checking: {resolved} (exists: {resolved.exists()}, has index: {index_file.exists()})")
-    if resolved.exists() and index_file.exists():
-        frontend_build_path = resolved
-        logger.info(f"✅ Found frontend build at: {frontend_build_path}")
-        break
-
-if not frontend_build_path:
-    logger.warning(f"⚠️ Frontend build not found. Project root: {project_root}")
+frontend_build_path = find_frontend_build()
 
 if frontend_build_path:
     try:
