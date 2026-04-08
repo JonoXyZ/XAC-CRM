@@ -2969,43 +2969,45 @@ app.add_middleware(
 )
 
 # Mount static files (React frontend build)
-# Try multiple possible paths for compatibility with both local and production
-
-# Check for environment variable first
-env_frontend_path = os.environ.get("FRONTEND_BUILD_PATH")
-if env_frontend_path:
-    logger.info(f"Using FRONTEND_BUILD_PATH env var: {env_frontend_path}")
-    possible_frontend_paths = [Path(env_frontend_path)]
-else:
-    possible_frontend_paths = [
-        Path(__file__).parent.parent / "frontend" / "build",  # /app/backend/../../frontend/build = /app/frontend/build
-        Path(__file__).parent.parent.parent / "frontend" / "build",  # Go up 3 levels
-        Path("/app") / "frontend" / "build",  # Explicit Railway root path
-        Path("/app/backend").parent / "frontend" / "build",  # From backend directory
-        Path.cwd() / ".." / "frontend" / "build",  # Parent of current working dir
-        Path.cwd() / "frontend" / "build",  # Current working directory
-        Path.cwd().parent / "frontend" / "build",  # Parent of cwd
-        Path.cwd() / "build",  # Frontend /build directly in cwd
-        Path("/workspace") / "frontend" / "build",  # Some environments
-    ]
-
-frontend_build_path = None
-for i, path in enumerate(possible_frontend_paths):
-    resolved_path = path.resolve()
-    logger.debug(f"Checking path {i+1}/{len(possible_frontend_paths)}: {resolved_path}")
-    if resolved_path.exists() and resolved_path.is_dir():
-        # Check if index.html exists
-        if (resolved_path / "index.html").exists():
-            frontend_build_path = resolved_path
-            logger.info(f"✅ Found frontend build at: {frontend_build_path}")
+# Step 1: Find project root by looking for .git or package.json
+def find_project_root():
+    """Find project root by searching for .git or package.json"""
+    current = Path(__file__).resolve()
+    for _ in range(10):  # Search up to 10 levels
+        if (current / ".git").exists() or (current / "package.json").exists():
+            logger.info(f"Found project root: {current}")
+            return current
+        if current.parent == current:  # Reached filesystem root
             break
-        else:
-            logger.debug(f"Directory exists but no index.html: {resolved_path}")
+        current = current.parent
+    return None
+
+project_root = find_project_root()
+if not project_root:
+    project_root = Path(__file__).parent.parent  # Fallback to ../
+
+logger.info(f"Project root: {project_root}")
+logger.info(f"Project root contents: {list(project_root.iterdir())[:10]}")
+
+# Step 2: Look for frontend build from project root
+frontend_build_path = None
+possible_paths = [
+    project_root / "frontend" / "build",
+    project_root / ".." / "frontend" / "build",
+    Path("/app") / "frontend" / "build",
+]
+
+for path in possible_paths:
+    resolved = path.resolve()
+    index_file = resolved / "index.html"
+    logger.debug(f"Checking: {resolved} (exists: {resolved.exists()}, has index: {index_file.exists()})")
+    if resolved.exists() and index_file.exists():
+        frontend_build_path = resolved
+        logger.info(f"✅ Found frontend build at: {frontend_build_path}")
+        break
 
 if not frontend_build_path:
-    logger.warning("⚠️ Frontend build directory not found at any checked paths")
-    logger.warning(f"Current working directory: {Path.cwd()}")
-    logger.warning(f"Current working dir contents: {list(Path.cwd().iterdir())[:5]}")
+    logger.warning(f"⚠️ Frontend build not found. Project root: {project_root}")
 
 if frontend_build_path:
     try:
