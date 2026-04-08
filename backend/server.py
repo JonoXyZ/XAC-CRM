@@ -2967,6 +2967,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi.responses import RedirectResponse
+
+@app.get("/")
+async def root():
+    """Root endpoint - redirect to frontend or API docs"""
+    # Redirect to API documentation
+    return RedirectResponse(url="/docs")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "service": "XAC CRM API"}
+
 import asyncio as async_lib
 
 async def appointment_reminder_loop():
