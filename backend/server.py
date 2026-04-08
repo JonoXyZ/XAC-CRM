@@ -3011,26 +3011,48 @@ if frontend_build_path:
     except Exception as e:
         logger.warning(f"Could not mount static files: {e}")
 
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
 
 @app.get("/")
 async def root():
-    """Root endpoint - serve frontend index.html or redirect to docs"""
+    """Root endpoint - serve frontend index.html or a fallback page"""
     try:
         if frontend_build_path and frontend_build_path.is_dir():
             index_path = frontend_build_path / "index.html"
-            logger.debug(f"Attempting to serve: {index_path}")
+            logger.info(f"Attempting to serve frontend from: {index_path}")
             if index_path.is_file():
                 logger.info("✅ Serving frontend index.html")
                 return FileResponse(index_path, media_type="text/html")
             else:
-                logger.warning(f"Index file not found at: {index_path}")
+                logger.warning(f"Frontend index.html not found at: {index_path}")
     except Exception as e:
-        logger.error(f"Error serving frontend: {e}")
+        logger.error(f"Error serving frontend: {e}", exc_info=True)
     
-    # Fallback: redirect to docs if frontend not available
-    logger.info("Falling back to API docs")
-    return RedirectResponse(url="/docs")
+    # Fallback: Return a simple HTML page
+    fallback_html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>XAC CRM</title>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5; }
+        .container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
+        h1 { color: #333; margin-top: 0; }
+        p { color: #666; }
+        .api-link { display: inline-block; margin-top: 20px; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>XAC CRM</h1>
+        <p>Welcome to your CRM system!</p>
+        <p>The frontend is currently loading. If you see this page, please refresh.</p>
+        <p>Or access the <a href="/docs" class="api-link">API Documentation</a></p>
+        <p style="margin-top: 40px; font-size: 12px; color: #999;">Frontend build path not found in this deployment.</p>
+    </div>
+</body>
+</html>"""
+    
+    return HTMLResponse(content=fallback_html, status_code=200)
 
 @app.get("/health")
 async def health_check():
