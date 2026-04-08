@@ -5,7 +5,7 @@ import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
-import { Bug, CheckCircle, Clock, Warning, ArrowsClockwise, Sparkles, X } from '@phosphor-icons/react';
+import { Bug, CheckCircle, Clock, Warning, ArrowsClockwise, Star, X } from '@phosphor-icons/react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -285,7 +285,7 @@ const BugReports = ({ user }) => {
                           disabled={isAnalyzing}
                           className="bg-purple-600 hover:bg-purple-700 text-white text-xs h-8"
                         >
-                          <Sparkles size={14} className="mr-1" />
+                          <Star size={14} className="mr-1" />
                           {isAnalyzing ? 'Analyzing...' : 'Fix with AI'}
                         </Button>
                       )}
@@ -316,7 +316,7 @@ const BugReports = ({ user }) => {
               <div className="p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
-                    <Sparkles size={24} className="text-purple-400" />
+                    <Star size={24} className="text-purple-400" />
                     <h2 className="text-2xl font-bold text-zinc-50">AI Analysis</h2>
                   </div>
                   <button onClick={cancelAnalysis} className="text-zinc-400 hover:text-zinc-50">

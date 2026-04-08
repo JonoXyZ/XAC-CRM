@@ -1,5 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Header, UploadFile, File, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -2967,12 +2968,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files (React frontend build)
+frontend_build_path = Path(__file__).parent.parent / "frontend" / "build"
+if frontend_build_path.exists():
+    app.mount("/static", StaticFiles(directory=frontend_build_path / "static"), name="static")
+
 from fastapi.responses import RedirectResponse
 
 @app.get("/")
 async def root():
-    """Root endpoint - redirect to frontend or API docs"""
-    # Redirect to API documentation
+    """Root endpoint - serve frontend or redirect to docs"""
+    # Try to serve index.html from frontend build
+    index_path = Path(__file__).parent.parent / "frontend" / "build" / "index.html"
+    if index_path.exists():
+        from fastapi.responses import FileResponse
+        return FileResponse(index_path)
+    # Fallback to API docs
     return RedirectResponse(url="/docs")
 
 @app.get("/health")
@@ -3457,6 +3468,22 @@ async def delete_workflow(workflow_id: str, current_user: dict = Depends(get_cur
     return {"success": True}
 
 app.include_router(api_router)
+
+# Serve index.html for all non-API routes (SPA fallback)
+from fastapi.responses import FileResponse
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    """Serve React SPA - return index.html for all routes except API"""
+    # Don't serve for actual files or docs
+    if full_path.startswith("static/") or full_path.startswith("docs") or full_path.startswith("openapi"):
+        return {"error": "Not found"}
+    
+    index_path = Path(__file__).parent.parent / "frontend" / "build" / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    
+    return {"error": "Not found"}
 
 if __name__ == "__main__":
     import uvicorn
