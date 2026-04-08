@@ -2970,26 +2970,39 @@ app.add_middleware(
 
 # Mount static files (React frontend build)
 # Try multiple possible paths for compatibility with both local and production
-possible_frontend_paths = [
-    Path(__file__).parent.parent / "frontend" / "build",  # Local development: backend/../../frontend/build
-    Path("/app") / "frontend" / "build",  # Railway production: /app/frontend/build
-    Path.cwd() / "frontend" / "build",  # Current working directory
-    Path.cwd() / "build",  # Frontend /build directly in cwd
-    Path(__file__).parent / ".." / ".." / "frontend" / "build",  # Alternate local path
-]
+
+# Check for environment variable first
+env_frontend_path = os.environ.get("FRONTEND_BUILD_PATH")
+if env_frontend_path:
+    logger.info(f"Using FRONTEND_BUILD_PATH env var: {env_frontend_path}")
+    possible_frontend_paths = [Path(env_frontend_path)]
+else:
+    possible_frontend_paths = [
+        Path(__file__).parent.parent / "frontend" / "build",  # /app/backend/../../frontend/build = /app/frontend/build
+        Path("/app") / "frontend" / "build",  # Explicit Railway path
+        Path("/workspace") / "frontend" / "build",  # Some environments
+        Path.cwd() / "frontend" / "build",  # Current working directory
+        Path.cwd().parent / "frontend" / "build",  # Parent of cwd
+        Path.cwd() / "build",  # Frontend /build directly in cwd
+    ]
 
 frontend_build_path = None
 for i, path in enumerate(possible_frontend_paths):
-    logger.debug(f"Checking path {i+1}: {path.resolve()}")
-    if path.exists():
-        frontend_build_path = path.resolve()
-        logger.info(f"✅ Found frontend build at: {frontend_build_path}")
-        break
+    resolved_path = path.resolve()
+    logger.debug(f"Checking path {i+1}/{len(possible_frontend_paths)}: {resolved_path}")
+    if resolved_path.exists() and resolved_path.is_dir():
+        # Check if index.html exists
+        if (resolved_path / "index.html").exists():
+            frontend_build_path = resolved_path
+            logger.info(f"✅ Found frontend build at: {frontend_build_path}")
+            break
+        else:
+            logger.debug(f"Directory exists but no index.html: {resolved_path}")
 
 if not frontend_build_path:
     logger.warning("⚠️ Frontend build directory not found at any checked paths")
     logger.warning(f"Current working directory: {Path.cwd()}")
-    logger.warning(f"Server file location: {Path(__file__)}")
+    logger.warning(f"Current working dir contents: {list(Path.cwd().iterdir())[:5]}")
 
 if frontend_build_path:
     try:
