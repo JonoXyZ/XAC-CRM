@@ -2979,11 +2979,14 @@ if env_frontend_path:
 else:
     possible_frontend_paths = [
         Path(__file__).parent.parent / "frontend" / "build",  # /app/backend/../../frontend/build = /app/frontend/build
-        Path("/app") / "frontend" / "build",  # Explicit Railway path
-        Path("/workspace") / "frontend" / "build",  # Some environments
+        Path(__file__).parent.parent.parent / "frontend" / "build",  # Go up 3 levels
+        Path("/app") / "frontend" / "build",  # Explicit Railway root path
+        Path("/app/backend").parent / "frontend" / "build",  # From backend directory
+        Path.cwd() / ".." / "frontend" / "build",  # Parent of current working dir
         Path.cwd() / "frontend" / "build",  # Current working directory
         Path.cwd().parent / "frontend" / "build",  # Parent of cwd
         Path.cwd() / "build",  # Frontend /build directly in cwd
+        Path("/workspace") / "frontend" / "build",  # Some environments
     ]
 
 frontend_build_path = None

@@ -95,7 +95,7 @@ const BugReports = ({ user }) => {
 
   const applyFix = async () => {
     if (!analysisModal) return;
-    
+
     setIsApplyingFix(true);
     try {
       const token = localStorage.getItem('token');
@@ -104,7 +104,7 @@ const BugReports = ({ user }) => {
         { analysis_id: analysisModal.analysisId },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      
+
       toast.success('Fix applied! Bug status moved to "In Progress"');
       setAnalysisModal(null);
       fetchReports();
@@ -134,7 +134,7 @@ const BugReports = ({ user }) => {
         formData,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      
+
       toast.success('Bug report submitted successfully!');
       setSubmitModal(false);
       setFormData({ description: '', priority: 'medium', page: '', browser: '' });
@@ -171,8 +171,8 @@ const BugReports = ({ user }) => {
             <p className="mt-2 text-base text-zinc-400">All submitted bug reports from your team</p>
           </div>
           <div className="flex gap-2">
-            <Button 
-              onClick={() => setSubmitModal(true)} 
+            <Button
+              onClick={() => setSubmitModal(true)}
               className="bg-blue-600 hover:bg-blue-700 text-white"
               data-testid="submit-bug-btn"
             >
