@@ -2971,22 +2971,30 @@ app.add_middleware(
 # Mount static files (React frontend build)
 # Try multiple possible paths for compatibility with both local and production
 possible_frontend_paths = [
-    Path(__file__).parent.parent / "frontend" / "build",  # Local development
-    Path("/app") / "frontend" / "build",  # Railway production
+    Path(__file__).parent.parent / "frontend" / "build",  # Local development: backend/../../frontend/build
+    Path("/app") / "frontend" / "build",  # Railway production: /app/frontend/build
     Path.cwd() / "frontend" / "build",  # Current working directory
+    Path.cwd() / "build",  # Frontend /build directly in cwd
+    Path(__file__).parent / ".." / ".." / "frontend" / "build",  # Alternate local path
 ]
 
 frontend_build_path = None
-for path in possible_frontend_paths:
+for i, path in enumerate(possible_frontend_paths):
+    logger.debug(f"Checking path {i+1}: {path.resolve()}")
     if path.exists():
-        frontend_build_path = path
-        logger.info(f"Found frontend build at: {frontend_build_path}")
+        frontend_build_path = path.resolve()
+        logger.info(f"✅ Found frontend build at: {frontend_build_path}")
         break
+
+if not frontend_build_path:
+    logger.warning("⚠️ Frontend build directory not found at any checked paths")
+    logger.warning(f"Current working directory: {Path.cwd()}")
+    logger.warning(f"Server file location: {Path(__file__)}")
 
 if frontend_build_path:
     try:
         app.mount("/static", StaticFiles(directory=frontend_build_path / "static"), name="static")
-        logger.info("Frontend static files mounted successfully")
+        logger.info("✅ Frontend static files mounted successfully")
     except Exception as e:
         logger.warning(f"Could not mount static files: {e}")
 
@@ -2994,13 +3002,21 @@ from fastapi.responses import RedirectResponse, FileResponse
 
 @app.get("/")
 async def root():
-    """Root endpoint - serve frontend index.html"""
-    if frontend_build_path:
-        index_path = frontend_build_path / "index.html"
-        if index_path.exists():
-            return FileResponse(index_path, media_type="text/html")
+    """Root endpoint - serve frontend index.html or redirect to docs"""
+    try:
+        if frontend_build_path and frontend_build_path.is_dir():
+            index_path = frontend_build_path / "index.html"
+            logger.debug(f"Attempting to serve: {index_path}")
+            if index_path.is_file():
+                logger.info("✅ Serving frontend index.html")
+                return FileResponse(index_path, media_type="text/html")
+            else:
+                logger.warning(f"Index file not found at: {index_path}")
+    except Exception as e:
+        logger.error(f"Error serving frontend: {e}")
     
     # Fallback: redirect to docs if frontend not available
+    logger.info("Falling back to API docs")
     return RedirectResponse(url="/docs")
 
 @app.get("/health")
