@@ -2969,21 +2969,38 @@ app.add_middleware(
 )
 
 # Mount static files (React frontend build)
-frontend_build_path = Path(__file__).parent.parent / "frontend" / "build"
-if frontend_build_path.exists():
-    app.mount("/static", StaticFiles(directory=frontend_build_path / "static"), name="static")
+# Try multiple possible paths for compatibility with both local and production
+possible_frontend_paths = [
+    Path(__file__).parent.parent / "frontend" / "build",  # Local development
+    Path("/app") / "frontend" / "build",  # Railway production
+    Path.cwd() / "frontend" / "build",  # Current working directory
+]
 
-from fastapi.responses import RedirectResponse
+frontend_build_path = None
+for path in possible_frontend_paths:
+    if path.exists():
+        frontend_build_path = path
+        logger.info(f"Found frontend build at: {frontend_build_path}")
+        break
+
+if frontend_build_path:
+    try:
+        app.mount("/static", StaticFiles(directory=frontend_build_path / "static"), name="static")
+        logger.info("Frontend static files mounted successfully")
+    except Exception as e:
+        logger.warning(f"Could not mount static files: {e}")
+
+from fastapi.responses import RedirectResponse, FileResponse
 
 @app.get("/")
 async def root():
-    """Root endpoint - serve frontend or redirect to docs"""
-    # Try to serve index.html from frontend build
-    index_path = Path(__file__).parent.parent / "frontend" / "build" / "index.html"
-    if index_path.exists():
-        from fastapi.responses import FileResponse
-        return FileResponse(index_path)
-    # Fallback to API docs
+    """Root endpoint - serve frontend index.html"""
+    if frontend_build_path:
+        index_path = frontend_build_path / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path, media_type="text/html")
+    
+    # Fallback: redirect to docs if frontend not available
     return RedirectResponse(url="/docs")
 
 @app.get("/health")
@@ -3470,7 +3487,6 @@ async def delete_workflow(workflow_id: str, current_user: dict = Depends(get_cur
 app.include_router(api_router)
 
 # Serve index.html for all non-API routes (SPA fallback)
-from fastapi.responses import FileResponse
 
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
@@ -3479,11 +3495,13 @@ async def serve_spa(full_path: str):
     if full_path.startswith("static/") or full_path.startswith("docs") or full_path.startswith("openapi"):
         return {"error": "Not found"}
     
-    index_path = Path(__file__).parent.parent / "frontend" / "build" / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
+    # Use the frontend_build_path found during startup
+    if frontend_build_path:
+        index_path = frontend_build_path / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path, media_type="text/html")
     
-    return {"error": "Not found"}
+    return {"error": "Frontend not available"}
 
 if __name__ == "__main__":
     import uvicorn
